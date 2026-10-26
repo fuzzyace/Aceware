@@ -8965,6 +8965,7 @@ public:
         releaseBadge();
         m_history.clear();
         m_directFires = 0;
+        m_directMode = false; // a new level re-tries the normal input path
         for (auto& r : m_holdLen) r.clear();
         for (auto& r : m_gapLen) r.clear();
         m_lastPressAt = m_lastReleaseAt = -1.0;
@@ -12301,16 +12302,23 @@ public:
                     m_streamShift = std::max(0.0, now - m_liveArrive); // the shift it really got
                 }
                 m_last.liveReason = m_liveState.reason;
-                bool const late = m_liveState.reason == ibcore::FireReason::Deadline;
+                // A queued ship / robot release has no window at all (windowTime()
+                // returns 0 for it): it goes in on its own scheduled tick by design.
+                // That is not "the window ended with nothing safe found".
+                ModeInfo relMode;
+                relMode.add(pl->m_player1);
+                bool const onScheduleRelease = !*fired && ((relMode.ship && !relMode.wave) || relMode.robot);
+                bool const late = m_liveState.reason == ibcore::FireReason::Deadline && !onScheduleRelease;
                 // Followed the plan to its tick: the normal case now, not a warning.
                 bool const followed = m_planTrust && m_liveState.reason == ibcore::FireReason::Plan;
                 if (followed) m_planFires++;
                 m_planTrust = false;
                 // Always shown: when the held click really went in, and why.
                 bool const onPlan = !followed && m_liveState.reason == ibcore::FireReason::Plan;
-                pushLog(fmt::format("{} fired +{}t ({}){}{}", *fired ? "PRESS" : "REL", firedTicks,
-                                    (holdWhy && m_liveState.reason == ibcore::FireReason::Proven) ? holdWhy
-                                                                                                  : fireReasonText(m_liveState.reason),
+                std::string const why = (holdWhy && m_liveState.reason == ibcore::FireReason::Proven) ? holdWhy
+                                        : onScheduleRelease ? "on schedule"
+                                                            : fireReasonText(m_liveState.reason);
+                pushLog(fmt::format("{} fired +{}t ({}){}{}", *fired ? "PRESS" : "REL", firedTicks, why,
                                     m_liveWaited ? ", waited for a cleaner path" : "",
                                     ((late || onPlan) && c.hudVerbose) ? " | live: " + refuseSummary() : std::string()),
                         (late || onPlan) ? COL_ORANGE : COL_GREEN, false);
@@ -13794,7 +13802,9 @@ protected:
             }
             auto* item = CCMenuItemExt::createSpriteExtra(node, [this](CCMenuItemSpriteExtra*) { openSettings(); });
             item->setSizeMult(1.1f);
-            item->setPosition({W - PAD - d / 2.f + 1.f, FOOT_H / 2.f + 0.5f});
+            // The far right of the footer belongs to the resize grip: the cog sits
+            // one slot further in, so the corner handle can't draw over it.
+            item->setPosition({W - PAD - d / 2.f - 6.f, FOOT_H / 2.f + 0.5f});
             m_titleMenu->addChild(item);
         }
         // Close: a white X in a small box.
@@ -13840,14 +13850,21 @@ protected:
             m_rowsT.push_back(tl);
         }
 
-        // resize grip: three short strokes in the bottom-right corner
-        for (int i = 0; i < 3; i++) {
-            if (auto* g = aa::roundBox(9.f - static_cast<float>(i) * 3.f, 1.f, 0.5f, C_DIM, 170)) {
-                g->setPosition({FULL_W - 12.f + static_cast<float>(i) * 3.f, 4.f + static_cast<float>(i) * 3.f});
-                g->setRotation(-45.f);
-                this->addChild(g, 6);
-                m_grip.push_back(g);
+        // resize grip: a 45° corner mark, drawn as segments (a 9-slice this small
+        // distorts). Hidden unless you are dragging the corner: the settings cog
+        // lives next to it, and a mark at rest reads as a stray line.
+        if (auto* grip = CCDrawNode::create()) {
+            ccColor4F gc = ccc4FFromccc3B(C_DIM);
+            gc.a = 0.67f;
+            for (int i = 0; i < 3; i++) {
+                float const len = 8.f - static_cast<float>(i) * 2.5f;
+                CCPoint const a{FULL_W - 9.f, 3.f + static_cast<float>(i) * 3.5f};
+                CCPoint const b{a.x + len * 0.7071f, a.y + len * 0.7071f};
+                grip->drawSegment(a, b, 0.45f, gc);
             }
+            grip->setVisible(false);
+            this->addChild(grip, 6);
+            m_grip.push_back(grip);
         }
 
         restorePosition();
@@ -15406,7 +15423,7 @@ protected:
         bool const have = s_online.total >= 0 && s_online.online >= 0;
         m_onlineOn->setVisible(have);
         m_onlineOff->setVisible(have);
-        float left = W - PAD - 15.f; // the settings button is at the far right
+        float left = W - PAD - 22.f; // the settings button and the resize corner are at the far right
         if (have) {
             long long const off = std::max(0LL, s_online.total - s_online.online);
             m_onlineOn->setString(fmt::format("{} online", s_online.online).c_str());
@@ -15618,10 +15635,11 @@ protected:
             auto* r = typeinfo_cast<CCRGBAProtocol*>(m_tabHi);
             if (r) r->setOpacity(static_cast<GLubyte>(236 + 14 * std::sin(m_animT * 2.4f)));
         }
-        // the resize strokes pulse while you drag them, and lean in on hover
+        // the resize strokes only exist while you drag the corner, and pulse then
         for (size_t i = 0; i < m_grip.size(); i++) {
             CCNode* g = m_grip[i];
             if (!g) continue;
+            g->setVisible(m_resizing);
             float const pulse = m_resizing ? (1.25f + 0.12f * std::sin(m_animT * 14.f)) : 1.f;
             g->setScale(pulse);
         }
@@ -15658,10 +15676,13 @@ protected:
         }
         CCPoint const p = convertToNodeSpace(touch->getLocation());
         if (!insideLocal(p)) return false;
-        // corner grip: drag to resize, no settings menu needed
-        if (p.x > FULL_W - 16.f && p.y < 16.f) {
+        // corner grip: drag to resize, no settings menu needed. Starts past the
+        // settings cog, which owns the rest of the footer's right end.
+        if (p.x > FULL_W - 11.f && p.y < 16.f) {
             m_resizing = true;
-            m_dragStartScale = getScale();
+            // Window Size is a multiplier (1.0 = half the original size, see init()),
+            // so the drag starts from the multiplier, not from the live scale.
+            m_dragStartScale = getScale() / std::max(0.01f, 0.5f * PLATFORM_WINDOW_SCALE);
             return true;
         }
         // course demo: click the icon and it explodes like in GD
@@ -15694,9 +15715,10 @@ protected:
     void ccTouchMoved(CCTouch* touch, CCEvent*) override {
         CCPoint const d = touch->getDelta();
         if (m_resizing) {
-            float const ns = std::clamp(m_dragStartScale + (d.x + d.y) * 0.004f, 0.7f, 1.6f);
-            setScale(ns);
-            s_builtScale = ns; // don't let ensure() rebuild it mid-drag
+            // Multiplier units, like the Window Size setting and init()'s scale.
+            float const mult = std::clamp(m_dragStartScale + (d.x + d.y) * 0.008f, 0.7f, 1.6f);
+            setScale(0.5f * PLATFORM_WINDOW_SCALE * mult);
+            s_builtScale = mult; // don't let ensure() rebuild it mid-drag
             return;
         }
         m_tapMoved += std::fabs(d.x) + std::fabs(d.y);
@@ -15711,7 +15733,10 @@ protected:
 
     void ccTouchEnded(CCTouch*, CCEvent*) override {
         if (m_resizing) {
-            Mod::get()->setSettingValue<double>("window-size", static_cast<double>(getScale()));
+            // Save the multiplier, not the absolute scale: a drag to 1.2 rebuilds at 1.2.
+            float const mult = std::clamp(getScale() / std::max(0.01f, 0.5f * PLATFORM_WINDOW_SCALE), 0.7f, 1.6f);
+            Mod::get()->setSettingValue<double>("window-size", static_cast<double>(mult));
+            s_builtScale = mult;
             m_resizing = false;
             return;
         }

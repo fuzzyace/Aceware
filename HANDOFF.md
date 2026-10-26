@@ -1,7 +1,13 @@
 # Aceware — handoff
 
 Written 2026-10-25 for picking this project up in another chat or with another model.
-**Do not add this file to the public repo** (`Aceware/`) — it is workspace-only.
+Reconciled 2026-10-26 against the real tree — §2, §3, §7, §8 and §9 had drifted after the workspace
+was collapsed from `Downloads\GDbuffer` into this single folder.
+
+> **Housekeeping, unresolved:** this file was meant to stay out of the public repo, but it is tracked
+> and was pushed in the initial upload. Decide and act: `git rm --cached HANDOFF.md` plus a
+> `.gitignore` entry (there is currently no `.gitignore` at all) to make it local again, or accept
+> publishing it — it does expose internals and author notes.
 
 ---
 
@@ -9,7 +15,7 @@ Written 2026-10-25 for picking this project up in another chat or with another m
 
 Aceware is a **Geode mod for Geometry Dash 2.2081 (Windows)** that buffers input: if you click
 slightly early, the click is held and fired on the first tick where the hidden simulated player
-survives. Mod id `ace.aceware`, developer `Ace`, current version **v1.3.1** (`mod.json` is the single
+survives. Mod id `ace.aceware`, developer `Ace`, current version **v1.3.4** (`mod.json` is the single
 source of truth; the in-game badge is derived from it at runtime).
 
 It started as a derivative of the upstream project *Nova / Input Buffer by AlQuerez23*, which is
@@ -18,55 +24,57 @@ Do not reintroduce that name.
 
 ---
 
-## 2. Folder map (workspace root = `C:\Users\ariel\Downloads\GDbuffer`)
+## 2. Folder map (workspace root = `C:\Users\ariel\Aceware`)
+
+The old `Downloads\GDbuffer\` split — pristine upstream clone + `NovaPrime\` build mirror + `Aceware\`
+public folder — is **gone**. This folder is the working tree *and* the public repo, and it builds in
+place. The pristine upstream clone is gone too, so diffs against upstream are no longer possible
+locally; keep edits small and read them back.
 
 ```
-GDbuffer\
-├─ src\, resources\, mod.json, ...        upstream clone (READ-ONLY REFERENCE — untouched original)
-│                                          useful as: pristine upstream main.cpp for diffs
-├─ NovaPrime\                              WORKING BUILD WORKSPACE (where you compile)
-│   ├─ build.ps1                           the build (uses ..\toolchain, not CMake)
-│   ├─ package.ps1                         zips build\ace.aceware.dll into Aceware.geode
-│   ├─ build\                              objects (obj\gen, obj\inline, obj\tools, obj\arc), DLL, logs
-│   ├─ src\                                mirrored source — see §5
-│   └─ Aceware.geode                       latest packaged artifact (build output)
-├─ Aceware\                                PUBLIC REPO FOLDER (what gets pushed to GitHub)
-│   ├─ README.md, CHANGELOG.md, logo.png, about.md, mod.json
-│   ├─ CMakeLists.txt                       standard Geode build (needs a real Geode SDK)
-│   ├─ .github\workflows\build.yml          CI: windows build, tag → release
-│   ├─ src\                                 authoritative source (synced from here)
-│   ├─ resources\fonts\                     Poppins Bold + OFL licence
-│   ├─ tools\local-build.ps1                the offline build (expects ..\..\toolchain)
-│   └─ release\Aceware-1.3.1.geode          shipped binary
-└─ toolchain\                              self-assembled MSVC + SDK + Geode headers (NOT shipped)
-    ├─ msvc\VC\Tools\MSVC\14.44.35207\      cl.exe, link.exe, CRT headers/libs
-    ├─ sdk_nuget\microsoft.windows.sdk.cpp{,.x64}\   Windows SDK 10.0.26100
-    ├─ dl\sdk-extract\geode-5.11.2\loader\include\   Geode public headers + link\win64\*.lib
-    ├─ codegen-out\                         bindings generated for GD 2.2081 (CodeGen Win64)
-    ├─ deps\{fmt,asp2,arc,json,result,nontype_functional,TulipHook}\   pinned deps
-    └─ geode-lib\Geode.lib                  import lib from the Geode v5.11.2 release zip
+Aceware\                                  repo root = workspace = build root
+├─ src\                                    authoritative source; edit and build here
+│   ├─ main.cpp                            the mod (~15.9k lines) — anchors in §5
+│   ├─ BufferCore.hpp                      searchDelay, InputQueue, liveStep
+│   ├─ AceTheme.hpp                        namespace aw: shapes, glows, CourseView
+│   ├─ AceCourse.hpp                       course / trajectory helpers
+│   ├─ OnlineURL.hpp                       empty URL; network paths are stubs
+│   └─ ProjectDefs.hpp                     offline-build defines (not used by CMake)
+├─ resources\fonts\                        Poppins-Bold.ttf + OFL.txt
+├─ tools\local-build.ps1                   the offline build (expects ..\..\toolchain)
+├─ .github\workflows\build.yml             CI: build + artifact upload (no release job)
+├─ release\Aceware-1.3.4.geode             shipped binary
+├─ CMakeLists.txt                          standard Geode build (the CI path)
+├─ mod.json                                version single source of truth
+├─ README.md, CHANGELOG.md, about.md, logo.png
+├─ build\                                  made by local-build.ps1 (obj\, DLL, *.log) — absent for now
+└─ HANDOFF.md                              this file — tracked in git, see the note at the top
 ```
 
-**Source of truth:** `Aceware\src\`. `NovaPrime\src\` is a copy for the offline build. When you edit,
-edit `Aceware\src`, then copy to `NovaPrime\src` and build (or edit both).
+`tools\local-build.ps1` derives the toolchain as the **sibling of the repo root** (`$np` = repo root,
+`$tc` = its parent + `\toolchain`), so it belongs at `C:\Users\ariel\toolchain\` — not inside the repo,
+and not under `Downloads\`. It is **not present on this machine**, so there is no local build until it
+is restored (§7).
+
+**Source of truth:** `src\` here. There is no mirror to keep in sync any more, and no `package.ps1`.
 
 ---
 
 ## 3. Build / package / release
 
+Two paths. **A** is offline and currently unavailable; **B** is CI.
+
+**A — local, offline** (needs the toolchain restored first):
+
 ```powershell
-# build (incremental, ~20 s after the first full run which is ~25 min)
-powershell -ExecutionPolicy Bypass -File C:\Users\ariel\Downloads\GDbuffer\NovaPrime\build.ps1
-
-# package
-powershell -ExecutionPolicy Bypass -File C:\Users\ariel\Downloads\GDbuffer\NovaPrime\package.ps1
-# -> C:\Users\ariel\Downloads\GDbuffer\NovaPrime\Aceware.geode
-
-# publish copy
-copy NovaPrime\Aceware.geode Aceware\release\Aceware-<version>.geode
+powershell -ExecutionPolicy Bypass -File C:\Users\ariel\Aceware\tools\local-build.ps1
+# -> C:\Users\ariel\Aceware\build\ace.aceware.dll
 ```
 
-`build.ps1` does five passes:
+Incremental after the first run: ~20 s, against ~25 min cold (it compiles 941 generated + 933 inline
+binding sources).
+
+`local-build.ps1` does five passes:
 1. **gen** — `src\main.cpp` + 941 generated binding sources.
 2. **inline** — the 933 inline binding sources, in a **separate object folder** (the two sets share
    file names, so they must not share `\Fo`).
@@ -75,6 +83,32 @@ copy NovaPrime\Aceware.geode Aceware\release\Aceware-<version>.geode
 4. **arc** — the arc runtime units the entry initialises.
 5. **link** — all objects + `Geode.lib` + SDK `libcocos2d/libExtensions/fmod/glew32/gd-libcurl`
    + `opengl32 user32 gdi32 winmm shell32 advapi32 ws2_32 ole32 version`.
+
+**Packaging.** There is no `package.ps1` in this tree. A `.geode` is just a zip whose root holds the
+DLL, the manifest, `about.md` and `resources\` — exactly the five entries inside
+`release\Aceware-1.3.4.geode`:
+
+```
+about.md    ace.aceware.dll    mod.json    resources\fonts\OFL.txt    resources\fonts\Poppins-Bold.ttf
+```
+
+Verified recipe — stage those four items in an empty folder, then from that folder:
+
+```powershell
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[IO.Compression.ZipFile]::CreateFromDirectory(
+    (Get-Location).Path,
+    'C:\Users\ariel\Aceware\release\Aceware-<version>.geode',
+    [IO.Compression.CompressionLevel]::Optimal, $false)
+```
+
+`$false` = no base directory, so the entries sit at the archive root. This writes `resources\fonts\...`
+with backslashes, which is what every artifact shipped so far uses. It **throws** if the target file
+already exists — delete the old `.geode` first (that quirk is why the recipe is written out here).
+
+**B — CI.** `.github\workflows\build.yml` runs `geode-sdk/build-geode-mod@main` with `combine: true` on
+`windows-latest` for every push, then uploads an `Aceware` artifact. It has **no tag → release job**, so
+pushing a tag does not publish a binary (see §8).
 
 Specific build quirks already solved (do not "clean these up"):
 - Three generated files need a forced include to resolve their own types:
@@ -129,7 +163,7 @@ gated on that flag, so they are dormant. There is no level scan UI and `ScanRunn
 
 ---
 
-## 5. Where things are in `src\main.cpp` (~16.5k lines)
+## 5. Where things are in `src\main.cpp` (~15.9k lines)
 
 | Section | Anchor | What lives there |
 |---|---|---|
@@ -168,8 +202,9 @@ frame `{15,16,20}`, sidebar `{18,20,25}`, card `{23,25,31}`, button `{32,36,42}`
 4. **No learned spots, no level scan.**
 5. **Everything stays inside the window.** Lists clip; no row may draw outside the panel.
 6. **Branding is Aceware / Ace.** No old names, anywhere (including comments and identifiers).
-7. Update `Aceware\CHANGELOG.md` and, when user-facing, `about.md` and `README.md`.
-8. Rebuild, repackage, copy the `.geode` into `Aceware\release\`, and verify the export.
+7. Update `CHANGELOG.md` and, when user-facing, `about.md` and `README.md`.
+8. Rebuild with `tools\local-build.ps1`, repackage into `release\Aceware-<version>.geode`, and verify
+   the export. This folder is the repo — there is no publish-copy step any more.
 
 ---
 
@@ -191,13 +226,19 @@ frame `{15,16,20}`, sidebar `{18,20,25}`, card `{23,25,31}`, button `{32,36,42}`
 - **Pause button texture** was replaced with drawn shapes (no PNG) because the original path showed a
   missing texture. That fix is also unverified visually.
 - **mod id changes reset saved data** (settings keyed per id). Do not change `ace.aceware`.
-- **Two DLLs in `mods\`** — if an older `NovaPrime.geode` is still installed, both load and fight over
-  the window key. Tell the user to delete it.
-- **Toolchain fragility:** `toolchain\` is hand-assembled (MSVC packages via `vsdownload.py` patched for
-  this sandbox, Windows SDK via NuGet, bindings via `CodeGen Win64`). A `vsdownload` re-run needs
-  `--major 17` and the serial-pool patch. If it breaks, `Aceware\CMakeLists.txt` + a real Geode SDK is
-  the fallback.
-- **`build.ps1` links against `Geode.lib` from the release zip**, which lacks some loader symbols
+- **Two DLLs in `mods\`** — if a `.geode` from before the rename is still installed, both load and
+  fight over the window key. Tell the user to delete it.
+- **Toolchain fragility:** the toolchain is hand-assembled (MSVC packages via `vsdownload.py` patched
+  for this sandbox, Windows SDK via NuGet, bindings via `CodeGen Win64`). A `vsdownload` re-run needs
+  `--major 17` and the serial-pool patch. If it breaks, `CMakeLists.txt` + a real Geode SDK is the
+  fallback (that is also the only path available right now — see the next bullet).
+- **Building without a toolchain in the repo.** This folder has no compiler and no `build\`. A build
+  was done on 2026-10-26 by invoking MSVC from the old toolchain directly: `cl.exe @inc.rsp` on
+  `src\main.cpp`, then `link.exe` with the pre-built binding/arc/tool objects, `Geode.lib` and the
+  SDK import libs, then zipping the DLL with `mod.json`, `about.md` and `resources\fonts\`. It
+  produced a 1,214,464-byte DLL exporting `geodeImplicitEntry` and depending on `Geode.dll` +
+  `libcocos2d.dll`. Otherwise the only build is CI (`.github\workflows\build.yml`).
+- **`local-build.ps1` links against `Geode.lib` from the release zip**, which lacks some loader symbols
   (`arc::*`, `geode::getMod`). That is why `entry.cpp` + arc/asp objects are compiled in locally.
   Do not remove them.
 
@@ -217,20 +258,25 @@ frame `{15,16,20}`, sidebar `{18,20,25}`, card `{23,25,31}`, button `{32,36,42}`
 - **Quality of life**: he keeps asking for "useful stuff in the menu". Ideas not yet done — a
   per-session buffered/saved counter in the footer, a "Reset settings" action, a log filter by tag,
   an on-screen mini-indicator of the current stage while playing.
-- **Publishing**: GitHub repo is ready (`Aceware\`); needs `git init`, remote, push, then tag `v1.3.1`
-  for CI to attach the binary. README/CHANGELOG are written.
+- **Publishing**: the repo is already live — `origin` = `https://github.com/fuzzyace/Aceware.git`,
+  three commits pushed (`initial upload` + the two workflow commits). What is actually left: **no tag
+  exists and no release has been cut.** Also, the workflow has no tag → release job (it only uploads
+  an artifact), so pushing tag `v1.3.1` will not attach the binary — either add a release step to
+  `build.yml` or create the GitHub Release by hand and upload `release\Aceware-<version>.geode`.
+  README/CHANGELOG are written.
 
 ---
 
 ## 9. Onboarding checklist for a new model
 
-1. Read this file, then `Aceware\README.md` and `Aceware\CHANGELOG.md`.
-2. Open `Aceware\src\main.cpp` at the anchors in §5; skim `BufferCore.hpp` for `searchDelay` and
+1. Read this file, then `README.md` and `CHANGELOG.md` in the same folder.
+2. Open `src\main.cpp` at the anchors in §5; skim `BufferCore.hpp` for `searchDelay` and
    `liveStep`, those two govern everything.
 3. Never trust line numbers in this document — they drift. Search by the §5 anchors.
-4. To change behaviour: edit `Aceware\src`, copy to `NovaPrime\src`, build, package, verify export.
+4. To change behaviour: edit `src\`, rebuild with `tools\local-build.ps1` (needs the toolchain, §7),
+   package, verify export. The tree is the repo — no mirror to sync, no publish copy.
 5. To test what you cannot test: add temporary `log::info` lines and ask the user for
    `Geometry Dash\geode\logs\Geode <date>.log`, or have them hit **Quick → Copy Report** in the
    Assists tab (it copies a full engine report to the clipboard).
-6. Bump the version, update CHANGELOG, copy the artifact to `Aceware\release\`, and say plainly what
+6. Bump the version, update CHANGELOG, refresh `release\Aceware-<version>.geode`, and say plainly what
    was verified vs. only compiled.
