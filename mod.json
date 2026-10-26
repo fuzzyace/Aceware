@@ -1,0 +1,95 @@
+{
+	"geode": "5.11.2",
+	"gd": {
+		"win": "2.2081"
+	},
+	"version": "v1.3.1",
+	"id": "ace.aceware",
+	"name": "Aceware",
+	"developer": "Ace",
+	"description": "Input buffer for Geometry Dash. Your click waits for the first tick it survives instead of killing you.",
+	"resources": {
+		"fonts": {
+			"ibFont": {
+				"path": "resources/fonts/Poppins-Bold.ttf",
+				"size": 48,
+				"charset": "32-126"
+			}
+		}
+	},
+	"settings": {
+		"stage": {
+			"type": "string",
+			"name": "Stage",
+			"description": "How far ahead a click can be saved. Off is raw input; each stage is a wider window. F6 cycles.",
+			"default": "Stage 2",
+			"one-of": [
+				"Off",
+				"Stage 1",
+				"Stage 2",
+				"Stage 3",
+				"Stage 4",
+				"Extreme",
+				"Custom"
+			]
+		},
+		"window-key-v3": {
+			"type": "keybind",
+			"name": "Window Key",
+			"description": "Shows / hides the Aceware window.",
+			"default": "RightShift",
+			"category": "gameplay"
+		},
+		"cycle-key": {
+			"type": "keybind",
+			"name": "Stage Cycle Key",
+			"description": "Cycles the stage.",
+			"default": "F6",
+			"category": "gameplay"
+		},
+		"remove-click-key": {
+			"type": "keybind",
+			"name": "Remove Click Key",
+			"description": "Removes the last kept click you passed.",
+			"default": "Backspace",
+			"category": "gameplay"
+		},
+		"pause-button": {
+			"type": "bool",
+			"name": "Pause Menu Button",
+			"description": "Shows the round green Aceware button in the pause menu.",
+			"default": true
+		},
+		"window-size": {
+			"type": "float",
+			"name": "Window Size",
+			"description": "Size of the Aceware window. You can also drag its corner in game.",
+			"default": 1.0,
+			"min": 0.7,
+			"max": 1.6,
+			"control": {
+				"input": true,
+				"slider": true,
+				"slider-step": 0.05
+			}
+		},
+		"predict-portals": {
+			"type": "bool",
+			"name": "Predict Through Portals",
+			"description": "Predictions continue through gamemode portals.",
+			"default": true
+		},
+		"prediction-check": {
+			"type": "bool",
+			"name": "Prediction Check",
+			"description": "Checks predictions against what really happens. Costs almost nothing.",
+			"default": true
+		},
+		"online-count": {
+			"type": "bool",
+			"name": "Show Online Users",
+			"description": "Aceware has no server and makes no network requests. This setting does nothing.",
+			"default": false
+		}
+	}
+}
