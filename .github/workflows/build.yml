@@ -13,6 +13,11 @@ jobs:
       - uses: geode-sdk/build-geode-mod@main
         with:
           combine: true
+
+  package:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
       - uses: geode-sdk/build-geode-mod/combine@main
         id: build
       - uses: actions/upload-artifact@v4
