@@ -3,6 +3,14 @@
 All notable changes to Aceware. Version numbers follow `mod.json`; the in-game badge shows the
 short form (`v1.3` for `1.3.0`).
 
+## 1.4.4
+
+- A cat. Every 25-45 seconds it pads along the bottom of the window, bobbing as it
+  goes, then leaves. Click it and it says "meow" and hurries off at double speed. It
+  is drawn from circles and lines, so there is no texture that can go missing, and it
+  never leaves the window.
+- (It also doubles as a live test of the auto-updater: install 1.4.3, tag 1.4.4, and
+  the next launch should offer this build by itself.)
 ## 1.4.3
 
 - An update now ends in a prompt: Aceware updated / Aceware <ver> is installed. Restart the game to
