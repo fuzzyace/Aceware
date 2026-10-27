@@ -1,9 +1,9 @@
 // ============================================================================
-//  Input Buffer  v1.24.1                    (Geode mod for Geometry Dash)
+//  Aceware                                 (Geode mod for Geometry Dash)
 //
 //  WHAT THIS MOD IS
 //  ----------------
-//  An INPUT BUFFER for Geometry Dash.
+//  Aceware holds an early click back and fires it on the first tick that survives.
 //
 //  In vanilla GD a click that lands a hair too early or too late is simply a
 //  death. This mod sits between your input and the game. For every click it
@@ -722,7 +722,7 @@
 //    * Only a tick that gets you through is ever aimed at (it used to aim at
 //      the "longest-surviving" tick even if it died, overriding the search).
 //    * Fires in the MIDDLE of the longest stretch of working ticks.
-//    * Tick picking moved to ibcore::pickOrbTick and unit tested: every tick
+//    * Tick picking moved to acecore::pickOrbTick and unit tested: every tick
 //      for overlaps up to 24, else every 3rd tick, then every tick +-2 around
 //      working ticks, the orb's start / end, and the 3 longest survivors, then
 //      (if still nothing) every remaining tick from the end back. Finds a
@@ -820,7 +820,7 @@
 //      PlayerObject circle effects are also blocked during tests.
 //    * Android: mod.json lists android 2.2081; the mouse-wheel hook is desktop
 //      only (GEODE_IS_DESKTOP); the keyboard hook is macOS only (Windows polls
-//      the key). New on every platform: an "Input Buffer" button in the pause
+//      the key). New on every platform: an "Aceware" button in the pause
 //      menu shows / hides the window (the way to open it on Android).
 //      .github/workflows/multi-platform.yml builds Windows + Android32/64 and
 //      combines them into one .geode.
@@ -831,7 +831,7 @@
 //  NEW IN 2.1
 //  ------------------------------------------------------------------------
 //    * Footer left: "<Window Key> to toggle" (white bold) instead of the status
-//      line ("INPUT BUFFER  EXTREME" ...); phones: "Pause menu > Buffer".
+//      line ("ACEWARE  EXTREME" ...); phones: "Pause menu > Aceware".
 //    * Stage tab: the "Left Alt: show / hide" credit text is gone; Discord is a
 //      violet pill (white bold, click = copy). Card hints, the Modes hint and
 //      grey Stats rows are white; "forget level" is violet like the badge.
@@ -1243,6 +1243,9 @@ constexpr int    SPOT_HOLD_MAX_BASE      = 16;
 // Wave spam: inputs less than this apart (60fps frames, ~150 ms) are one stream;
 // a stream keeps one shift until a pause.
 constexpr double STREAM_GAP_FRAMES       = 9.0;
+// Raw Wave Spam only goes raw above this click rate; below it the wave is still
+// corrected like any other mode. (7 cps = one press every 8.57 frames @60.)
+constexpr double RAW_SPAM_MIN_CPS        = 7.0;
 // (2.3) Spam: CPU per input inside a wave / ship stream. A click could take
 // 6 ms just for its first test (12 ms worst) - at 240 fps a frame is 4.2 ms,
 // so spamming dropped frames every few inputs (reports: "worst click cost
@@ -1291,7 +1294,7 @@ constexpr StageDef STAGES[] = {
     // clicks too long ("too harsh"). Now an even climb: 1, 2, 3, 5 frames.
     {"Stage 3", "Stage 3: 3 frames (2 ship)",             true,  false, {3, 3, 3, 3, 2, 2, 3, 3}},
     {"Stage 4", "Stage 4: 5 frames (4 wave, 2 ship)",     true,  false, {5, 5, 5, 5, 2, 2, 4, 4}},
-    {"Extreme", "EXTREME: 20 frames (12 wave, 2 ship)",   true,  true,  {8, 8, 8, 8, 5, 5, 5, 5}},
+    {"Extreme", "EXTREME: 20 frames (12 wave, 2 ship) - BUGGY", true, true, {8, 8, 8, 8, 5, 5, 5, 5}},
     // Your own frames (window's Stage tab, Apply). Windows are filled in by Config::load.
     {"Custom",  "CUSTOM",                                 true,  true,  {0, 0, 0, 0, 0, 0, 0, 0}},
 };
@@ -1353,7 +1356,9 @@ struct Config {
     bool  rayView      = false; // Tools (2.2): Show Rays
     bool  orbHelper    = false; // Tools tab (2.1): an early click waits for the next orb
     bool  scanView     = true;  // Tools tab (2.1): draw the scan's versions while it runs
-    bool  learnSpots   = true;  // learn from attempts (saved value, Stage tab)
+    bool  learnSpots   = true;  // session memory: reuse the clicks that worked (Assists tab)
+    bool  sessionMemory = true; // saved value "session-memory", copied into learnSpots above
+    bool  learnedMargin = false; // (off) grow the search margin after a death - kept for reference
     bool  predictPortals = true; // (2.3) predictions go through gamemode portals (setting)
     bool  driftCheck   = true;  // (2.3) 100 ms prediction check for the Dev tab (setting)
     // (2.3) autoplay options (Tools tab, saved values)
@@ -1410,7 +1415,12 @@ struct Config {
         c.minTicks   = std::clamp(static_cast<int>(std::lround(mod->getSavedValue<double>("min-ticks", 1.0))), 1, c.maxTicks);
         c.orbHelper  = mod->getSavedValue<bool>("orb-helper", true); // on by default since 2.2
         c.scanView   = mod->getSavedValue<bool>("scan-view", true);
-        c.learnSpots = false; // Aceware: decided every click, nothing remembered
+        // Session memory (Assists tab): every click that worked on this level is
+        // remembered by where it landed, and later attempts fire on those spots
+        // instead of deciding again. Memory only - nothing is written to disk, and
+        // it is wiped when the level is opened again.
+        c.sessionMemory = mod->getSavedValue<bool>("session-memory", true);
+        c.learnSpots = c.sessionMemory;
         c.predictPortals = mod->getSettingValue<bool>("predict-portals");
         c.driftCheck = mod->getSettingValue<bool>("prediction-check");
         c.apLearn  = mod->getSavedValue<bool>("auto-learn", true);
@@ -1981,7 +1991,7 @@ struct ClickRecord {
     double    time     = -1.0; // game time (60fps frames) when the click arrived
     TruncInfo trunc;
     int       liveTicks = -1;   // buffered: when it really fired (ticks after the click), -1 not yet
-    ibcore::FireReason liveReason = ibcore::FireReason::None;
+    acecore::FireReason liveReason = acecore::FireReason::None;
 };
 
 // Everything the logs need to know about one click.
@@ -2190,8 +2200,8 @@ class TrajectoryBufferSim {
     long long m_cleanWaits  = 0; // live: waited for a cleaner moment
 
     // Spot memory (v1.12): where inputs landed on earlier attempts of this level
-    ibcore::SpotMemory     m_spots;
-    ibcore::OutcomeTracker m_outcome;
+    acecore::SpotMemory     m_spots;
+    acecore::OutcomeTracker m_outcome;
     double m_outcomeWindow = SPOT_WINDOW_HOLD;
     bool   m_outcomeLand   = false; // judged on landing (cube-type)
     bool   m_outcomeAir    = false; // left the ground since the input
@@ -2217,7 +2227,7 @@ class TrajectoryBufferSim {
     bool m_simDead        = false;
     TruncInfo m_simTrunc;       // set when the player is about to touch something we can't model
     bool  m_recordPath  = false;         // keep the P1 path of each test (accuracy / overlay)
-    std::vector<ibcore::Point2> m_path;  // path of the last test
+    std::vector<acecore::Point2> m_path;  // path of the last test
     bool  m_simHeld     = false; // button state inside the current test
     int   m_simTick     = 0; // step index inside the current test
     int   m_simDelay    = 0; // step at which the tested input lands
@@ -2254,14 +2264,14 @@ class TrajectoryBufferSim {
     double m_gameTime = 0.0;
     // Buffer state: the held input and everything that arrives while it is
     // held, replayed in order with the same shift (see BufferCore.hpp).
-    ibcore::InputQueue m_queue;
+    acecore::InputQueue m_queue;
 
     // Live re-planning: while an input is held back, every tick tests "fire it
     // now?" from the REAL game state and fires at the first safe tick, instead
     // of trusting a delay predicted at click time (long Extreme delays drift).
     // Every input queued behind it gets the same check when it is next.
     bool   m_live = false;          // the live re-planner owns the queue head
-    ibcore::LiveState m_liveState;  // see BufferCore.hpp (tested there)
+    acecore::LiveState m_liveState;  // see BufferCore.hpp (tested there)
     double m_liveArrive = 0.0;      // when the triggering click arrived
     int    m_livePlanTicks = 0;     // planned delay, ticks (for the log)
 
@@ -2281,16 +2291,16 @@ class TrajectoryBufferSim {
 
     // Live accuracy: prediction vs reality. A buffered click's check starts
     // when it actually fires, so it is aligned to the real step.
-    ibcore::PredictionTracker m_tracker;
+    acecore::PredictionTracker m_tracker;
 
     // Auto windows (kept across sessions).
-    ibcore::Calibrator m_calib[W_COUNT];
+    acecore::Calibrator m_calib[W_COUNT];
 
     // Input rhythm per mode (this session): how long you hold, and how long you
     // stay released before pressing again. Feeds the cube tap model and the
     // ship / wave "could you still save it" cycle.
-    ibcore::Calibrator m_holdLen[W_COUNT];
-    ibcore::Calibrator m_gapLen[W_COUNT];
+    acecore::Calibrator m_holdLen[W_COUNT];
+    acecore::Calibrator m_gapLen[W_COUNT];
     double m_lastPressAt   = -1.0;
     double m_lastReleaseAt = -1.0;
 
@@ -2317,7 +2327,7 @@ class TrajectoryBufferSim {
     };
     std::vector<RoutePt> m_route;              // this level, sorted by x
     std::filesystem::path m_routeFile;
-    std::vector<ibcore::Point2> m_routePath;   // the scan's path itself (for curved guide lines), sorted by x
+    std::vector<acecore::Point2> m_routePath;   // the scan's path itself (for curved guide lines), sorted by x
     std::vector<std::pair<float, float>> m_scanned; // stretches a scan already went through
     int         m_routeOff = 0;                // route checks in a row far off the scanned path
     struct SavedStats {
@@ -2383,7 +2393,7 @@ class TrajectoryBufferSim {
     // you stay on the path the plan predicted - checked by position, no
     // prediction per tick. Off the path: the full per-tick check takes over.
     bool      m_planTrust = false;
-    std::vector<ibcore::Point2> m_planPath; // predicted position after each step from the click
+    std::vector<acecore::Point2> m_planPath; // predicted position after each step from the click
     double    m_planGrid = 0.0;             // tick grid start of that click
     long long m_planFires = 0, m_planDrifts = 0, m_planTicksSaved = 0;
     // Orbs the real player used this attempt (1.24.9). GD's m_isActivated is set
@@ -2404,6 +2414,12 @@ class TrajectoryBufferSim {
     double m_streamLast  = -1e9; // last wave input (game time)
     double m_streamShift = 0.0;  // shift of the stream's inputs so far (game time)
     int    m_streak        = 0;
+    // Press timestamps (game time, 60fps frames) for the "how fast is he clicking"
+    // estimate that decides whether Raw Wave Spam may take over.
+    static constexpr int PRESS_RATE_N = 12;
+    double m_pressAt[PRESS_RATE_N] = {};
+    int    m_pressAtN = 0; // samples stored (caps at PRESS_RATE_N)
+    int    m_pressAtI = 0; // next slot
 
     // CPU budget controller
     float m_horizonScale = 1.0f;
@@ -2487,7 +2503,7 @@ class TrajectoryBufferSim {
     }
 
     // Median of a rhythm sample set, or a default until there are enough.
-    static float rhythm(ibcore::Calibrator const& c, float def) {
+    static float rhythm(acecore::Calibrator const& c, float def) {
         return c.count() >= RHYTHM_MIN_SAMPLES ? c.percentile(0.5f) : def;
     }
 
@@ -2516,7 +2532,7 @@ class TrajectoryBufferSim {
                 mod->setSavedValue<std::string>(std::string("calib-") + WINDOW_KEYS[i], "");
             }
             invalidateCfg();
-            log::info("[InputBuffer] calibration data cleared");
+            log::info("[Aceware] calibration data cleared");
         } else {
             for (int i = 0; i < W_COUNT; i++) {
                 m_calib[i].deserialize(mod->getSavedValue<std::string>(std::string("calib-") + WINDOW_KEYS[i], ""));
@@ -2684,7 +2700,7 @@ public:
                 m_route.push_back(r);
             }
             std::ifstream pin(dir / (m_lvlKey + "-path.txt"));
-            ibcore::Point2 pt;
+            acecore::Point2 pt;
             while (pin >> pt.x >> pt.y) m_routePath.push_back(pt);
             std::ifstream din(dir / (m_lvlKey + "-done.txt"));
             float a = 0.f, b = 0.f;
@@ -2714,13 +2730,13 @@ public:
 
     // Route from a level scan replaces what it covers ([lo, hi] in x).
     void routeMerge(std::vector<RoutePt> const& found, float lo, float hi,
-                    std::vector<ibcore::Point2> const& path = {}) {
+                    std::vector<acecore::Point2> const& path = {}) {
         if (!path.empty()) {
-            std::vector<ibcore::Point2> np;
+            std::vector<acecore::Point2> np;
             np.reserve(m_routePath.size() + path.size());
             for (auto const& q : m_routePath) if (q.x < lo || q.x > hi) np.push_back(q);
             for (auto const& q : path) if (q.x >= lo && q.x <= hi) np.push_back(q);
-            std::stable_sort(np.begin(), np.end(), [](ibcore::Point2 const& a, ibcore::Point2 const& b) { return a.x < b.x; });
+            std::stable_sort(np.begin(), np.end(), [](acecore::Point2 const& a, acecore::Point2 const& b) { return a.x < b.x; });
             m_routePath = std::move(np);
         }
         // stretches scanned (so auto scan knows where it still has to go)
@@ -2771,9 +2787,9 @@ public:
                                 [x](std::pair<float, float> const& r) { return x >= r.first && x <= r.second; });
         if (rit == m_scanned.end()) { m_routeOff = 0; return; }
         auto it = std::lower_bound(m_routePath.begin(), m_routePath.end(), x,
-                                   [](ibcore::Point2 const& q, float v) { return q.x < v; });
+                                   [](acecore::Point2 const& q, float v) { return q.x < v; });
         if (it == m_routePath.end() || it == m_routePath.begin()) return;
-        ibcore::Point2 const a = *(it - 1), b = *it;
+        acecore::Point2 const a = *(it - 1), b = *it;
         if (b.x - a.x > 200.f) return; // a gap in the path (scan stopped there)
         float const t = b.x - a.x > 0.01f ? (x - a.x) / (b.x - a.x) : 0.f;
         float const py = a.y + t * (b.y - a.y);
@@ -2786,7 +2802,7 @@ public:
         float const end = rit->second;
         auto inside = [cut, end](float v) { return v >= cut && v <= end; };
         std::erase_if(m_route, [&](RoutePt const& r) { return inside(r.x); });
-        std::erase_if(m_routePath, [&](ibcore::Point2 const& q) { return inside(q.x); });
+        std::erase_if(m_routePath, [&](acecore::Point2 const& q) { return inside(q.x); });
         if (cut <= rit->first + 1.f) m_scanned.erase(rit);
         else rit->second = cut;
         routeSave();
@@ -2935,7 +2951,7 @@ public:
     // syncSimPlayer copies) and then gets these values on top. Copying into a
     // spare hidden PlayerObject and starting from that lost something: in a
     // mini wave the copy died on its first tick.
-#define IB_SNAP_FIELDS(X) \
+#define ACE_SNAP_FIELDS(X) \
     X(m_width) X(m_height) X(m_gravityMod) X(m_isOnGround) X(m_isUpsideDown) X(m_vehicleSize) X(m_playerSpeed) \
     X(m_yVelocity) X(m_gravity) X(m_speedMultiplier) X(m_position) X(m_lastPortalPos) X(m_lastGroundedPos) \
     X(m_lastActivatedPortal) X(m_isOnGround2) X(m_lastLandTime) X(m_stateOnGround) X(m_isGoingLeft) X(m_isSideways) \
@@ -2952,9 +2968,9 @@ public:
     /* (2.3) the rest of the player's plain physics state: route / scan states carried the real player's */ \
     X(m_wasTeleported) X(m_reverseSync) X(m_dashX) X(m_dashY) X(m_dashAngle) X(m_slopeAngle) X(m_slopeSlidingMaybeRotated) X(m_scaleXRelated) X(m_scaleXRelated2) X(m_scaleXRelated3) X(m_scaleXRelated4) X(m_scaleXRelated5) X(m_scaleXRelatedTime) X(m_isBallRotating) X(m_isBallRotating2) X(m_slopeAngleRadians) X(m_rotationSpeed) X(m_rotateSpeed) X(m_isRotating) X(m_yStart) X(m_gameModeChangedTime) X(m_padRingRelated) X(m_maybeIsFalling) X(m_maybeCanRunIntoBlocks) X(m_isOnGround3) X(m_isOnGround4) X(m_maybeTouchedBreakableBlock) X(m_reverseRelated) X(m_shipRotation) X(m_platformerVelocityRelated) X(m_hasEverHitRing) X(m_unk838) X(m_stateScale) X(m_platformerXVelocity) X(m_maybeHasStopped) X(m_isSliding) X(m_maybeSlopeForce) X(m_isOnIce) X(m_physDeltaRelated) X(m_isMoving) X(m_stateDartSlide) X(m_stateHitHead) X(m_isOutOfBounds) X(m_fallStartY) X(m_unk50C) X(m_unk510) X(m_unk669) X(m_unkA29) X(m_unkA99)
     struct PlayerSnap {
-#define IB_SNAP_DECL(f) std::remove_cvref_t<decltype(std::declval<PlayerObject&>().f)> f{};
-        IB_SNAP_FIELDS(IB_SNAP_DECL)
-#undef IB_SNAP_DECL
+#define ACE_SNAP_DECL(f) std::remove_cvref_t<decltype(std::declval<PlayerObject&>().f)> f{};
+        ACE_SNAP_FIELDS(ACE_SNAP_DECL)
+#undef ACE_SNAP_DECL
         std::vector<int> touchedRings; // gd::unordered_set: copied by hand (like syncSimPlayer does)
         int     mode = 0;              // modeCode() - the scan passes gamemode portals
         CCPoint pos{};
@@ -2983,9 +2999,9 @@ public:
                 if (x != y) add(name, "differs");
             }
         };
-#define IB_SNAP_DIFFL(f) cmp(#f, a.f, b.f);
-        IB_SNAP_FIELDS(IB_SNAP_DIFFL)
-#undef IB_SNAP_DIFFL
+#define ACE_SNAP_DIFFL(f) cmp(#f, a.f, b.f);
+        ACE_SNAP_FIELDS(ACE_SNAP_DIFFL)
+#undef ACE_SNAP_DIFFL
         if (std::fabs(a.pos.x - b.pos.x) > 1e-4f || std::fabs(a.pos.y - b.pos.y) > 1e-4f)
             add("pos", fmt::format("({:.3f},{:.3f})/({:.3f},{:.3f})", a.pos.x, a.pos.y, b.pos.x, b.pos.y));
         if (std::fabs(a.rot - b.rot) > 1e-3f) add("rot", fmt::format("{:.2f}/{:.2f}", a.rot, b.rot));
@@ -3014,9 +3030,9 @@ public:
                 if (x != y) add(name, "differs");
             }
         };
-#define IB_SNAP_DIFF(f) cmp(#f, a.f, b.f);
-        IB_SNAP_FIELDS(IB_SNAP_DIFF)
-#undef IB_SNAP_DIFF
+#define ACE_SNAP_DIFF(f) cmp(#f, a.f, b.f);
+        ACE_SNAP_FIELDS(ACE_SNAP_DIFF)
+#undef ACE_SNAP_DIFF
         if (std::fabs(a.pos.x - b.pos.x) > 1e-4f || std::fabs(a.pos.y - b.pos.y) > 1e-4f)
             add("pos", fmt::format("({:.3f},{:.3f})/({:.3f},{:.3f})", a.pos.x, a.pos.y, b.pos.x, b.pos.y));
         if (std::fabs(a.rot - b.rot) > 1e-3f) add("rot", fmt::format("{:.2f}/{:.2f}", a.rot, b.rot));
@@ -3025,9 +3041,9 @@ public:
     }
     static PlayerSnap snapFrom(PlayerObject* p) {
         PlayerSnap s;
-#define IB_SNAP_GET(f) s.f = p->f;
-        IB_SNAP_FIELDS(IB_SNAP_GET)
-#undef IB_SNAP_GET
+#define ACE_SNAP_GET(f) s.f = p->f;
+        ACE_SNAP_FIELDS(ACE_SNAP_GET)
+#undef ACE_SNAP_GET
         for (int id : p->m_touchedRings) s.touchedRings.push_back(id);
         s.mode = modeCode(p);
         s.pos = p->getPosition();
@@ -3041,9 +3057,9 @@ public:
         p->setRotation(s.rot);
         p->setScale(s.scale);
         p->setContentSize(s.content);
-#define IB_SNAP_SET(f) p->f = s.f;
-        IB_SNAP_FIELDS(IB_SNAP_SET)
-#undef IB_SNAP_SET
+#define ACE_SNAP_SET(f) p->f = s.f;
+        ACE_SNAP_FIELDS(ACE_SNAP_SET)
+#undef ACE_SNAP_SET
         p->m_touchedRings.clear();
         for (int id : s.touchedRings) p->m_touchedRings.insert(id);
         // Scan crash fix (2.2): run states saved to disk come back with their
@@ -3235,9 +3251,9 @@ public:
     static uint64_t snapSig() {
         uint64_t h = 1469598103934665603ull;
         auto mix = [&](std::string_view t) { for (char ch : t) { h ^= static_cast<unsigned char>(ch); h *= 1099511628211ull; } };
-#define IB_SNAP_SIG(f) mix(#f); mix(std::to_string(sizeof(std::declval<PlayerSnap&>().f)));
-        IB_SNAP_FIELDS(IB_SNAP_SIG)
-#undef IB_SNAP_SIG
+#define ACE_SNAP_SIG(f) mix(#f); mix(std::to_string(sizeof(std::declval<PlayerSnap&>().f)));
+        ACE_SNAP_FIELDS(ACE_SNAP_SIG)
+#undef ACE_SNAP_SIG
         mix(Loader::get()->getGameVersion());
         return h;
     }
@@ -3252,7 +3268,7 @@ public:
         auto const f = anchorsFile();
         if (f.empty()) return;
         m_anchorsDirty = false;
-        std::string o = "IBRUN1";
+        std::string o = "ACERUN1";
         snapPut(o, snapSig());
         snapPut(o, static_cast<uint32_t>(m_anchors.size()));
         for (auto const& [k, a] : m_anchors) {
@@ -3265,9 +3281,9 @@ public:
             snapPut(o, sn.pos);
             snapPut(o, sn.scale);
             snapPut(o, sn.content);
-#define IB_SNAP_PUT(f) snapPut(o, sn.f);
-            IB_SNAP_FIELDS(IB_SNAP_PUT)
-#undef IB_SNAP_PUT
+#define ACE_SNAP_PUT(f) snapPut(o, sn.f);
+            ACE_SNAP_FIELDS(ACE_SNAP_PUT)
+#undef ACE_SNAP_PUT
             snapPut(o, static_cast<uint32_t>(sn.touchedRings.size()));
             for (int id : sn.touchedRings) snapPut(o, id);
         }
@@ -3280,7 +3296,7 @@ public:
         std::ifstream in(f, std::ios::binary);
         if (!in) return;
         std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        if (data.size() < 6 || data.compare(0, 6, "IBRUN1") != 0) return;
+        if (data.size() < 6 || data.compare(0, 6, "ACERUN1") != 0) return;
         char const* p = data.data() + 6;
         char const* e = data.data() + data.size();
         uint64_t sig = 0;
@@ -3298,9 +3314,9 @@ public:
             PlayerSnap& sn = a.snap;
             if (!snapGet(p, e, sn.mode) || !snapGet(p, e, sn.pos) || !snapGet(p, e, sn.scale) || !snapGet(p, e, sn.content)) break;
             bool ok = true;
-#define IB_SNAP_GETF(f) ok = ok && snapGet(p, e, sn.f);
-            IB_SNAP_FIELDS(IB_SNAP_GETF)
-#undef IB_SNAP_GETF
+#define ACE_SNAP_GETF(f) ok = ok && snapGet(p, e, sn.f);
+            ACE_SNAP_FIELDS(ACE_SNAP_GETF)
+#undef ACE_SNAP_GETF
             uint32_t rc = 0;
             if (!ok || !snapGet(p, e, rc) || rc > 4096) break;
             for (uint32_t j = 0; j < rc; j++) {
@@ -3432,7 +3448,7 @@ public:
 
     // The best version's inputs (furthest, then fewest inputs) -> the route.
     void scanBuildRoute(std::vector<BeamNode> const& from, std::vector<RoutePt>& out,
-                        std::vector<ibcore::Point2>* pathOut = nullptr) {
+                        std::vector<acecore::Point2>* pathOut = nullptr) {
         out.clear();
         if (pathOut) pathOut->clear();
         if (from.empty()) return;
@@ -3441,10 +3457,10 @@ public:
             if (from[i].x > from[best].x + 0.5f ||
                 (std::fabs(from[i].x - from[best].x) <= 0.5f && from[i].cost < from[best].cost)) best = i;
         }
-        if (pathOut) pathOut->push_back(ibcore::Point2{from[best].x, from[best].y, 0.f});
+        if (pathOut) pathOut->push_back(acecore::Point2{from[best].x, from[best].y, 0.f});
         for (int h = from[best].hist; h >= 0; h = m_beamHist[static_cast<size_t>(h)].parent) {
             BeamHist const& e = m_beamHist[static_cast<size_t>(h)];
-            if (pathOut) pathOut->push_back(ibcore::Point2{e.x, e.y, 0.f});
+            if (pathOut) pathOut->push_back(acecore::Point2{e.x, e.y, 0.f});
             if (!e.toggled) continue;
             RoutePt rp;
             rp.x = e.x;
@@ -3462,7 +3478,7 @@ public:
     void commitSegment(std::vector<BeamNode> const& from) {
         if (from.empty()) return;
         std::vector<RoutePt> found;
-        std::vector<ibcore::Point2> path;
+        std::vector<acecore::Point2> path;
         scanBuildRoute(from, found, &path);
         m_scanInputs += static_cast<int>(found.size());
         float hi = m_scanX;
@@ -4565,7 +4581,7 @@ public:
     struct PlanIn { float x = 0.f, y = 0.f; bool push = true; };
     AStarRun m_planA;                           // the pathfinder's search in progress (A*)
     bool  m_planActive = false;
-    std::vector<ibcore::Point2> m_aheadPath;     // last finished route
+    std::vector<acecore::Point2> m_aheadPath;     // last finished route
     std::vector<PlanIn> m_aheadInputs;
     bool  m_aheadDies = false;                   // every version died before the end
     Ref<CCLabelBMFont> m_rayLabel;
@@ -4574,14 +4590,14 @@ public:
         bool valid = false;
         double at = 0.0;
         std::string label;
-        std::vector<ibcore::Point2> onTime;
+        std::vector<acecore::Point2> onTime;
         bool onTimeDies = false;
-        std::vector<std::vector<ibcore::Point2>> rejected;
-        std::vector<ibcore::Point2> chosen;
+        std::vector<std::vector<acecore::Point2>> rejected;
+        std::vector<acecore::Point2> chosen;
     };
     Think m_think;
     bool  m_thinkRec = false;                   // recording the current click's tests
-    std::vector<std::pair<int, std::vector<ibcore::Point2>>> m_thinkTests; // (delay, path), verdict-ok paths flagged by sign
+    std::vector<std::pair<int, std::vector<acecore::Point2>>> m_thinkTests; // (delay, path), verdict-ok paths flagged by sign
 
     bool ensureOverlay(PlayLayer* pl) {
         if (!pl || !pl->m_objectLayer) return false;
@@ -4649,7 +4665,7 @@ public:
         m_think = Think{};
     }
 
-    void rayLine(std::vector<ibcore::Point2> const& path, CCPoint from, float width, ccColor4F col, size_t maxPts = 400) {
+    void rayLine(std::vector<acecore::Point2> const& path, CCPoint from, float width, ccColor4F col, size_t maxPts = 400) {
         if (path.empty()) return;
         size_t const step = path.size() > maxPts ? (path.size() + maxPts - 1) / maxPts : 1;
         CCPoint prev = from;
@@ -4670,7 +4686,7 @@ public:
     static constexpr int PLAN_HORIZON_BASE = 360; // (2.3) ~1.5 s ahead at 240 TPS (was 1 s)
     static constexpr int PLAN_MAX_STATES = 4000;  // then it shows the furthest it got and starts over
     static constexpr int GHOST_BASE = 360;        // (2.3) Show Rays' two ghosts: 1.5 s ahead
-    struct Ghost { std::vector<ibcore::Point2> path; bool dies = false, show = false; };
+    struct Ghost { std::vector<acecore::Point2> path; bool dies = false, show = false; };
     std::array<Ghost, 2> m_ghosts{};
     double m_ghostAt = -1.0;
     void planReset(PlayLayer* pl) {
@@ -4702,7 +4718,7 @@ public:
         std::vector<int> const chain = astarChain(m_planA, end);
         for (size_t i = 0; i < chain.size(); i++) {
             ANode const& n = m_planA.nodes[static_cast<size_t>(chain[i])];
-            m_aheadPath.push_back(ibcore::Point2{n.x, n.y, 0.f});
+            m_aheadPath.push_back(acecore::Point2{n.x, n.y, 0.f});
             if (i > 0 && n.toggled) {
                 ANode const& par = m_planA.nodes[static_cast<size_t>(chain[i - 1])];
                 m_aheadInputs.push_back(PlanIn{par.x, par.y, n.inputPush});
@@ -4724,7 +4740,7 @@ public:
     }
 
     // ---- what the buffer thought about the last click ------------------------------
-    void thinkCapture(bool push, Decision dec, SimResult const& r0, std::vector<ibcore::Point2> const& path0,
+    void thinkCapture(bool push, Decision dec, SimResult const& r0, std::vector<acecore::Point2> const& path0,
                       int bestDelay, int windowTicks, std::string const& modeName) {
         m_thinkRec = false;
         Think t;
@@ -4791,7 +4807,7 @@ public:
             float const dir = m_p1Dir < 0.f ? -1.f : 1.f;
             size_t first = 0;
             while (first < m_aheadPath.size() && (m_aheadPath[first].x - me.x) * dir < -2.f) first++;
-            std::vector<ibcore::Point2> const ahead(m_aheadPath.begin() + static_cast<std::ptrdiff_t>(first), m_aheadPath.end());
+            std::vector<acecore::Point2> const ahead(m_aheadPath.begin() + static_cast<std::ptrdiff_t>(first), m_aheadPath.end());
             ccColor4F const yel = m_aheadDies ? ccColor4F{1.f, 0.6f, 0.2f, 0.8f} : ccColor4F{1.f, 0.9f, 0.25f, 0.85f};
             if (ahead.size() > 1) rayLine(ahead, CCPoint{ahead[0].x, ahead[0].y}, 0.7f, yel);
             for (auto const& in : m_aheadInputs) {
@@ -4842,15 +4858,15 @@ public:
             float const dir = m_p1Dir < 0.f ? -1.f : 1.f;
             size_t first = 0;
             while (first + 1 < g.path.size() && (g.path[first].x - me.x) * dir < -2.f) first++;
-            std::vector<ibcore::Point2> ahead(g.path.begin() + static_cast<std::ptrdiff_t>(first), g.path.end());
+            std::vector<acecore::Point2> ahead(g.path.begin() + static_cast<std::ptrdiff_t>(first), g.path.end());
             if (ahead.size() < 2) continue;
             if (!g.dies) {
                 rayLine(ahead, me, 0.55f, col, 800);
                 continue;
             }
             size_t const red = std::min<size_t>(ahead.size() - 1, std::max<size_t>(8, ahead.size() / 4));
-            std::vector<ibcore::Point2> const safe(ahead.begin(), ahead.end() - static_cast<std::ptrdiff_t>(red));
-            std::vector<ibcore::Point2> const doom(ahead.end() - static_cast<std::ptrdiff_t>(red) - 1, ahead.end());
+            std::vector<acecore::Point2> const safe(ahead.begin(), ahead.end() - static_cast<std::ptrdiff_t>(red));
+            std::vector<acecore::Point2> const doom(ahead.end() - static_cast<std::ptrdiff_t>(red) - 1, ahead.end());
             if (safe.size() > 1) rayLine(safe, me, 0.55f, col, 800);
             rayLine(doom, CCPoint{doom[0].x, doom[0].y}, 0.7f, ccColor4F{1.f, 0.2f, 0.2f, 0.95f}, 800);
             rayCross({ahead.back().x, ahead.back().y}, 4.f, {1.f, 0.15f, 0.15f, 1.f});
@@ -4902,9 +4918,9 @@ public:
         }
         // (2.3) autoplay's route ahead of you (violet), inputs as ticks
         if (m_autoOn && m_rtOn && m_rt.size() > 1) {
-            std::vector<ibcore::Point2> route;
+            std::vector<acecore::Point2> route;
             int const from = std::max(m_rtBase, m_rtNow);
-            for (int t = from; t <= rtEnd(); t += 2) route.push_back(ibcore::Point2{rtAt(t).x, rtAt(t).y, 0.f});
+            for (int t = from; t <= rtEnd(); t += 2) route.push_back(acecore::Point2{rtAt(t).x, rtAt(t).y, 0.f});
             if (route.size() > 1) rayLine(route, CCPoint{route[0].x, route[0].y}, 0.8f, ccColor4F{0.75f, 0.45f, 1.f, 0.9f}, 900);
             for (auto const& [t, push] : m_rtEvents) {
                 if (t < from || t > rtEnd()) continue;
@@ -5564,7 +5580,7 @@ private:
         bool logged = false;
     };
     std::map<std::string, DriftStat> m_drift;
-    std::vector<ibcore::Point2> m_dfPath;
+    std::vector<acecore::Point2> m_dfPath;
     std::string m_dfKey, m_dfStart;
     bool  m_dfActive = false, m_dfInput = false, m_dfSimDied = false, m_dfSkip = false;
     int   m_dfAt = 0, m_dfK = 0, m_dfFirstOff = -1, m_dfSettle = 0;
@@ -5728,7 +5744,7 @@ private:
     struct AutoPlan {
         std::vector<int> ch;                // ticks (from the plan's start) with an input
         std::vector<uint8_t> held;          // the button on each tick
-        std::vector<ibcore::Point2> path;   // where you should be after each tick
+        std::vector<acecore::Point2> path;   // where you should be after each tick
         int  k = 0;                         // ticks played since it was made
         bool valid = false, ok = false, drifted = false;
         std::string mode;
@@ -5873,21 +5889,21 @@ private:
         if (lives(keep)) {
             ok = true;
         } else if (keep.end == SimEnd::Died) {
-            ibcore::EscapeParams ep;
+            acecore::EscapeParams ep;
             ep.first = 0;
             ep.space = std::max(tap ? 2 : 1, scaleTicks(2, sc));
             ep.lead = 1;
             ep.grace = 0;
             ep.maxChanges = tap ? 3 : 6; // (taps are two inputs each)
             ep.maxRuns = 40;
-            auto run = [&](std::vector<int> const& ch) -> ibcore::EscapeTry {
+            auto run = [&](std::vector<int> const& ch) -> acecore::EscapeTry {
                 SimResult const r = autoRun(pl, ch, H, false);
-                if (lives(r)) return ibcore::EscapeTry{ibcore::EscapeEnd::Survived, 0};
-                if (r.end == SimEnd::OutOfBudget) return ibcore::EscapeTry{ibcore::EscapeEnd::Budget, 0};
-                return ibcore::EscapeTry{ibcore::EscapeEnd::Died, std::max(0, r.deathStep)};
+                if (lives(r)) return acecore::EscapeTry{acecore::EscapeEnd::Survived, 0};
+                if (r.end == SimEnd::OutOfBudget) return acecore::EscapeTry{acecore::EscapeEnd::Budget, 0};
+                return acecore::EscapeTry{acecore::EscapeEnd::Died, std::max(0, r.deathStep)};
             };
-            ibcore::EscapeResult const er = ibcore::findEscape(ep, std::max(1, keep.deathStep), run);
-            if (er.escape == ibcore::Escape::Yes) {
+            acecore::EscapeResult const er = acecore::findEscape(ep, std::max(1, keep.deathStep), run);
+            if (er.escape == acecore::Escape::Yes) {
                 plan = er.changes;
                 ok = true;
             } else {
@@ -8446,7 +8462,7 @@ private:
                 if (judged) out.clear = std::min(out.clear, m_tickClr);
             }
 
-            if (m_recordPath) m_path.push_back(ibcore::Point2{s1->getPositionX(), s1->getPositionY(), s1->getRotation()});
+            if (m_recordPath) m_path.push_back(acecore::Point2{s1->getPositionX(), s1->getPositionY(), s1->getRotation()});
 
             if (m_simTrunc.valid && !m_scanNoclip) {
                 out.end = SimEnd::Truncated;
@@ -8619,7 +8635,7 @@ private:
     void lmarginOnDeath() {
         if (!m_bufWatch.on) return;
         m_bufWatch.on = false;
-        if (!cfg().learnSpots || m_gameTime - m_bufWatch.at > 30.0 || m_inputsSeen != m_bufWatch.inputs) return;
+        if (!cfg().learnedMargin || m_gameTime - m_bufWatch.at > 30.0 || m_inputsSeen != m_bufWatch.inputs) return;
         float& m = m_lmargin[m_bufWatch.g];
         if (m >= 3.f) return;
         m = std::min(3.f, m + 1.f);
@@ -8666,7 +8682,7 @@ private:
         if (c.extreme) extra += extra.empty() ? (c.custom ? "custom" : "extreme") : (c.custom ? " [custom]" : " [extreme]");
 
         if (c.debug) {
-            log::debug("[InputBuffer] {} {} {} tps={} win={}t h={} sim={}us evals={} f0={}/{} delay={}{} {}",
+            log::debug("[Aceware] {} {} {} tps={} win={}t h={} sim={}us evals={} f0={}/{} delay={}{} {}",
                        modeName, n.push ? "press" : "release", decisionName(n.d), tps, n.windowTicks,
                        n.horizon, n.us, n.evals, simEndName(n.r0.end), n.r0.ticks, n.delay,
                        n.orb ? " orb" : "", extra);
@@ -8734,7 +8750,7 @@ private:
 
     void notePredictionMiss(float err, float dx = 0.f, float dy = 0.f) {
         Config const& c = cfg();
-        if (c.debug) log::debug("[InputBuffer] prediction off by {:.1f}px at the 100ms check", err);
+        if (c.debug) log::debug("[Aceware] prediction off by {:.1f}px at the 100ms check", err);
         (void)c;
         pushLog(fmt::format("prediction off by {:.1f}px [{}] (sideways {:+.1f}, up/down {:+.1f}; you vs predicted)",
                             err, m_trackMode, dx, dy), COL_YELLOW, false);
@@ -8772,7 +8788,7 @@ private:
         float const ageMs = (age >= 0) ? ticksToMs(age, dt) : -1.f;
         // For "no fix" / "mispredict" the interesting number is predicted vs real death time.
         if (m_logDebug) {
-            log::debug("[InputBuffer] DEATH reason={} lastClick={} ({:.1f}ms ago) sim_f0={}/{} real_age={}t",
+            log::debug("[Aceware] DEATH reason={} lastClick={} ({:.1f}ms ago) sim_f0={}/{} real_age={}t",
                        deathName(why), decisionName(m_last.decision), ageMs,
                        simEndName(m_last.f0End), m_last.f0Ticks, age);
         }
@@ -8838,14 +8854,14 @@ private:
     //  Top-right panel content
     // ------------------------------------------------------------------------
     std::string headerText(Config const& c) const {
-        if (!c.enabled) return "INPUT BUFFER  OFF (raw input)";
-        if (!m_active)  return "INPUT BUFFER  OFF (practice only)";
-        if (c.custom)   return "INPUT BUFFER  CUSTOM";
-        if (c.extreme)  return "INPUT BUFFER  EXTREME";
+        if (!c.enabled) return "ACEWARE  OFF (raw input)";
+        if (!m_active)  return "ACEWARE  OFF (practice only)";
+        if (c.custom)   return "ACEWARE  CUSTOM";
+        if (c.extreme)  return "ACEWARE  EXTREME (BUGGY)";
         // the stage (2.2: it used to just say ON)
         std::string st = STAGES[std::clamp(c.stage, 0, STAGE_COUNT - 1)].setting;
         for (auto& ch : st) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
-        return "INPUT BUFFER  " + st;
+        return "ACEWARE  " + st;
     }
 
     ccColor3B headerColor(Config const& c) const {
@@ -8970,7 +8986,7 @@ public:
         for (auto& r : m_gapLen) r.clear();
         m_lastPressAt = m_lastReleaseAt = -1.0;
         m_accByMode.clear();
-        m_tracker = ibcore::PredictionTracker{};
+        m_tracker = acecore::PredictionTracker{};
         invalidateCfg();
         loadPersisted(cfg());
         lmarginLoad(); // (2.3) learned margins
@@ -8981,7 +8997,7 @@ public:
     void quit() {
         if ((m_logDebug || m_logCsv) && m_stats.clicks > 0) {
             std::string text = summary();
-            log::info("[InputBuffer] session: {}", text);
+            log::info("[Aceware] session: {}", text);
             if (m_logCsv) {
                 m_csv.row(fmt::format("SUMMARY,{:.1f},,,,,,,,,,,\"{}\"", levelMs(), text));
             }
@@ -9235,6 +9251,7 @@ public:
         m_streamLast = -1e9;
         m_streamShift = 0.0;
         m_streak = 0;
+        m_pressAtN = m_pressAtI = 0; // a fresh attempt: the click rate starts over
         m_outcome.clear(); // respawned: the last input is settled (death already counted)
         m_p1LastT = -1.0;
         m_liveWaited = false;
@@ -9656,13 +9673,13 @@ public:
         return t == GameObjectType::Hazard || t == GameObjectType::AnimatedHazard;
     }
 
-    static ibcore::Box toBox(CCRect const& r) {
-        return ibcore::Box{r.origin.x, r.origin.y, r.size.width, r.size.height};
+    static acecore::Box toBox(CCRect const& r) {
+        return acecore::Box{r.origin.x, r.origin.y, r.size.width, r.size.height};
     }
 
     // One hazard in one sim step: how close the player's box comes to it.
     void hazardClearance(PlayerObject* player, GameObject* obj) {
-        float const gap = ibcore::boxGap(toBox(player->getObjectRect()), toBox(obj->getObjectRect()));
+        float const gap = acecore::boxGap(toBox(player->getObjectRect()), toBox(obj->getObjectRect()));
         if (gap >= 0.f) m_tickClr = std::min(m_tickClr, gap);
     }
 
@@ -9676,15 +9693,15 @@ public:
     }
 
     // Match tolerance: x about half a tick of travel.
-    ibcore::SpotTol spotTol() const {
-        ibcore::SpotTol t;
+    acecore::SpotTol spotTol() const {
+        acecore::SpotTol t;
         t.x = std::clamp(0.5f * m_p1Speed * getValidDt(), 0.3f, 4.f);
         return t;
     }
 
-    ibcore::Spot spotNow(PlayLayer* pl, bool push, std::string const& modeName) const {
+    acecore::Spot spotNow(PlayLayer* pl, bool push, std::string const& modeName) const {
         PlayerObject* p = pl->m_player1;
-        ibcore::Spot s;
+        acecore::Spot s;
         s.x = p->getPositionX();
         s.y = p->getPositionY();
         s.vy = static_cast<float>(p->m_yVelocity);
@@ -9693,61 +9710,25 @@ public:
         return s;
     }
 
-    void finishOutcome(std::optional<ibcore::OutcomeTracker::Done> const& d) {
+    void finishOutcome(std::optional<acecore::OutcomeTracker::Done> const& d) {
         if (!d) return;
         m_spots.add(d->spot, d->good, spotTol());
         m_spotsDirty = true;
     }
 
-    // ---- spot memory on disk (one small text file per level) -------------------
+    // ---- session memory (this level, this session only) -------------------------
+    // Nothing is read from or written to disk: the memory starts empty when a level
+    // opens and is gone when you leave it. (Older builds kept a spots/ file per level.)
     void loadSpots(PlayLayer* pl) {
-        namespace fs = std::filesystem;
         m_spotFile.clear();
         m_spotsLoaded = 0;
         m_spotsDirty = false;
-        GJGameLevel* lvl = pl ? pl->m_level : nullptr;
-        if (!lvl) return;
-        int const id = lvl->m_levelID.value();
-        std::string const name = lvl->m_levelName;
-        m_spotLevelName = name;
-        std::string file;
-        if (id > 0) {
-            file = fmt::format("online-{}.txt", id);
-        } else {
-            // local / editor levels have no id: name + a hash so renames don't collide
-            uint32_t h = 2166136261u;
-            for (char ch : name) { h ^= static_cast<uint8_t>(ch); h *= 16777619u; }
-            file = fmt::format("local-{:08x}.txt", h);
-        }
-        std::error_code ec;
-        fs::path const dir = Mod::get()->getSaveDir() / "spots";
-        fs::create_directories(dir, ec);
-        m_spotFile = dir / file;
-        std::ifstream in(m_spotFile, std::ios::binary);
-        if (!in) return;
-        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        m_spots.deserialize(text);
-        // Learn from attempts is mini cube only: drop spots older versions saved
-        // for UFO and other modes (1.21-1.24.0), so nothing outside mini cube can
-        // ever use them (1.25.9).
-        {
-            uint32_t ok[4];
-            int n = 0;
-            for (bool push : {true, false})
-                for (bool ud : {false, true}) ok[n++] = spotKey("mini cube", push, ud);
-            size_t const gone = m_spots.keepIf([&](ibcore::Spot const& sp) {
-                return sp.key == ok[0] || sp.key == ok[1] || sp.key == ok[2] || sp.key == ok[3];
-            });
-            if (gone > 0) m_spotsDirty = true; // rewrite the file without them
-        }
-        m_spotsLoaded = m_spots.size();
+        m_spots.clear();
+        m_spotLevelName = (pl && pl->m_level) ? pl->m_level->m_levelName : std::string();
     }
 
     void saveSpots() {
-        if (!m_spotsDirty || m_spotFile.empty()) return;
-        m_spotsDirty = false;
-        std::ofstream out(m_spotFile, std::ios::binary | std::ios::trunc);
-        if (out) out << m_spots.serialize();
+        m_spotsDirty = false; // session-only: deliberately not persisted
     }
 
 public:
@@ -9802,7 +9783,8 @@ public:
         if (!cfg().learnSpots || !pl || !pl->m_player1 || pl->m_player1->m_isDead) return;
         ModeInfo mode;
         mode.add(pl->m_player1);
-        if (!modernEngine(mode)) return; // learn from attempts: mini cube only (UFO off again in 1.24.1)
+        // Every gamemode records now: the memory is per level and per session, so it
+        // cannot go stale the way a spots file from an older route used to.
         // Presses only. A death in ship / wave gets blamed on whatever input came
         // last, which is often a release that wasn't the problem; learned
         // "bad releases" then held your good releases back.
@@ -9852,7 +9834,7 @@ public:
     float clearTarget(std::string const& mode) const {
         auto it = m_accByMode.find(mode);
         if (it == m_accByMode.end()) return CLEAR_DEFAULT_PX;
-        return ibcore::clearanceTarget(it->second.checks, it->second.errSum, CLEAR_MIN_CHECKS,
+        return acecore::clearanceTarget(it->second.checks, it->second.errSum, CLEAR_MIN_CHECKS,
                                        CLEAR_DEFAULT_PX, CLEAR_MIN_PX, CLEAR_MAX_PX, CLEAR_ERR_SCALE);
     }
 
@@ -9909,7 +9891,7 @@ public:
     // ------------------------------------------------------------------------
     // Set the stage (0 = off, 1-4, 5 = extreme). Written into the setting, so
     // the settings screen, F6 and the window always agree.
-    // notify: the "Input Buffer - Stage 3 ..." banner - only for the F6 key
+    // notify: the "Aceware - Stage 3 ..." banner - only for the F6 key
     // (2.1); the window shows the stage itself.
     void setStage(int stage, bool notify = false) {
         stage = std::clamp(stage, 0, STAGE_COUNT - 1);
@@ -9923,7 +9905,7 @@ public:
         refreshFlags();
         clearBuffer();
         if (notify) Notification::create(fmt::format("Aceware - {}", STAGES[stage].name), NotificationIcon::None, 1.2f)->show();
-        log::info("[InputBuffer] {}", STAGES[stage].name);
+        log::info("[Aceware] {}", STAGES[stage].name);
         refreshHud(PlayLayer::get(), true);
     }
 
@@ -10444,6 +10426,7 @@ public:
     void settingsChanged() {
         invalidateCfg();
         refreshFlags();
+        if (!cfg().learnSpots) m_spots.clear(); // switching it off forgets this level
         clearBuffer();
         if (PlayLayer* pl = PlayLayer::get()) refreshHud(pl, true);
     }
@@ -10473,7 +10456,7 @@ public:
     };
 
     // ---- Wave rays (2.2) ------------------------------------------------------
-    //  See ibcore::waveRay: a wave input is two straight lines, so the delay
+    //  See acecore::waveRay: a wave input is two straight lines, so the delay
     //  to try is found by casting them against the level's hitboxes instead
     //  of running the physics for every candidate. The pick is then checked
     //  once with the real prediction - the rays only save the search.
@@ -10490,7 +10473,7 @@ public:
     std::vector<float> m_speedXs;                // (2.2) where the speed portals are
     float m_rayMaxW = 0.f;                       // widest one (query slack)
     PlayLayer* m_rayLayer = nullptr;             // level the index belongs to
-    std::vector<ibcore::RayBox> m_rayScratch;
+    std::vector<acecore::RayBox> m_rayScratch;
     long long m_rayPicks = 0, m_rayConfirmed = 0, m_rayRejected = 0;
 
     static bool waveOnly(ModeInfo const& m) {
@@ -10922,7 +10905,7 @@ public:
     }
 
     // Hitboxes inside [lo, hi] x [ylo, yhi], as they are right now.
-    void rayBoxes(float lo, float hi, float ylo, float yhi, std::vector<ibcore::RayBox>& out, bool* slopeNear = nullptr) const {
+    void rayBoxes(float lo, float hi, float ylo, float yhi, std::vector<acecore::RayBox>& out, bool* slopeNear = nullptr) const {
         out.clear();
         if (slopeNear) *slopeNear = false;
         auto it = std::lower_bound(m_rayObjs.begin(), m_rayObjs.end(), lo - m_rayMaxW,
@@ -10936,7 +10919,7 @@ public:
                 if (slopeNear) *slopeNear = true;
                 continue;
             }
-            ibcore::RayBox b;
+            acecore::RayBox b;
             b.x = r.origin.x;
             b.y = r.origin.y;
             b.w = r.size.width;
@@ -10949,7 +10932,7 @@ public:
     }
     // Your wave right now as two rays: where you are, your hitbox, speed and
     // slope, which way you're going and which way this input sends you.
-    bool waveRayInput(PlayLayer* pl, ModeInfo const& mode, bool push, float dt, ibcore::WaveRayIn& in) const {
+    bool waveRayInput(PlayLayer* pl, ModeInfo const& mode, bool push, float dt, acecore::WaveRayIn& in) const {
         PlayerObject* p = pl ? pl->m_player1 : nullptr;
         if (!p || p->m_isDead || p->m_isSideways || p->m_isPlatformer || !waveOnly(mode)) return false;
         if (pl->m_gameState.m_isDualMode || m_p1Speed < 0.01f || dt <= 0.f) return false;
@@ -10967,8 +10950,8 @@ public:
     }
     // The delay the rays pick for this input (-1: none in [minD, maxD],
     // -2: rays can't be used here). `nowHit`: where it hits as made.
-    int wavePick(PlayLayer* pl, Ctx const& x, int minD, int maxD, ibcore::WaveRayHit* nowHit = nullptr) {
-        ibcore::WaveRayIn in;
+    int wavePick(PlayLayer* pl, Ctx const& x, int minD, int maxD, acecore::WaveRayHit* nowHit = nullptr) {
+        acecore::WaveRayIn in;
         if (!waveRayInput(pl, x.mode, x.push, x.dt, in)) return -2;
         if (m_rayLayer != pl) buildRayIndex(pl);
         int const n = std::max(0, maxD) + std::max(1, x.waveCommit) + 2;
@@ -10981,7 +10964,7 @@ public:
         // simulation decides instead
         if (slope) return -2;
         for (float sx : m_speedXs) if (sx >= in.x - reachX && sx <= in.x + reachX) return -2;
-        return ibcore::waveRayDelay(in, minD, maxD, std::max(1, x.waveCommit), m_rayScratch, nowHit);
+        return acecore::waveRayDelay(in, minD, maxD, std::max(1, x.waveCommit), m_rayScratch, nowHit);
     }
     // Wave / ship: how long an input answers for the path - until your next
     // input at your own rhythm plus a short grace (wave), or 100 ms (ship).
@@ -11151,7 +11134,7 @@ public:
     // "Could the player still save this themselves?" for a test `r` that died.
     //  * cube / ball / spider / robot: died after landing again -> yes (next jump).
     //  * ship / wave / robot / UFO / swing (2.3): a real search for a way out
-    //    with follow-up inputs a person can make (ibcore::findEscape): the
+    //    with follow-up inputs a person can make (acecore::findEscape): the
     //    first no sooner than your own rhythm, a few ticks apart, at most 3,
     //    and the first one still has to work a little late. `base`: inputs
     //    already known (your queued release), played before the search's own.
@@ -11194,40 +11177,40 @@ public:
         }
         int const space = std::max(scaleTicks(2, x.s), tapFollow ? tapGap + scaleTicks(2, x.s) : react / 2);
 
-        ibcore::EscapeParams ep;
+        acecore::EscapeParams ep;
         ep.first = std::max(react, nBase > 0 ? lastBase + space : react);
         ep.space = space;
         ep.lead = 1;
         ep.grace = scaleTicks(WAVE_GRACE_BASE, x.s);
         ep.maxChanges = 3;
         ep.maxRuns = samples >= 3 ? 14 : samples == 2 ? 8 : 4; // (the delay search tries many delays: 4 each)
-        auto run = [&](std::vector<int> const& changes) -> ibcore::EscapeTry {
+        auto run = [&](std::vector<int> const& changes) -> acecore::EscapeTry {
             FollowUp f = base;
             bool held = heldAfterBase;
             for (int t : changes) {
                 int const at = delay + t;
                 if (tapFollow) {
-                    if (!f.add(at, false) || !f.add(at + tapGap, true)) return ibcore::EscapeTry{ibcore::EscapeEnd::Died, t};
+                    if (!f.add(at, false) || !f.add(at + tapGap, true)) return acecore::EscapeTry{acecore::EscapeEnd::Died, t};
                 } else {
                     held = !held;
-                    if (!f.add(at, held)) return ibcore::EscapeTry{ibcore::EscapeEnd::Died, t};
+                    if (!f.add(at, held)) return acecore::EscapeTry{acecore::EscapeEnd::Died, t};
                 }
             }
             SimResult const re = runSim(x, delay, f);
             m_escapeRuns++;
-            if (re.end == SimEnd::OutOfBudget) return ibcore::EscapeTry{ibcore::EscapeEnd::Budget, 0};
-            if (re.end == SimEnd::Survived || re.end == SimEnd::Truncated) return ibcore::EscapeTry{ibcore::EscapeEnd::Survived, 0};
-            return ibcore::EscapeTry{ibcore::EscapeEnd::Died, re.ticks};
+            if (re.end == SimEnd::OutOfBudget) return acecore::EscapeTry{acecore::EscapeEnd::Budget, 0};
+            if (re.end == SimEnd::Survived || re.end == SimEnd::Truncated) return acecore::EscapeTry{acecore::EscapeEnd::Survived, 0};
+            return acecore::EscapeTry{acecore::EscapeEnd::Died, re.ticks};
         };
-        ibcore::EscapeResult const er = ibcore::findEscape(ep, deadTicks, run);
+        acecore::EscapeResult const er = acecore::findEscape(ep, deadTicks, run);
         switch (er.escape) {
-            case ibcore::Escape::Yes:
+            case acecore::Escape::Yes:
                 m_escapeYes++;
                 return true;
-            case ibcore::Escape::No:
+            case acecore::Escape::No:
                 m_escapeNo++;
                 return false;
-            case ibcore::Escape::Unknown:
+            case acecore::Escape::Unknown:
             default:
                 if (budgetExpired()) { budgetHit = true; return false; } // out of CPU time
                 m_escapeUnknown++;
@@ -11238,26 +11221,56 @@ public:
 
     // Verdict for a test `rd` of the input delayed by d. `r0Ticks`: how far the
     // undelayed input got (a cut-short path must get clearly further to count).
-    ibcore::Verdict verdictFor(Ctx const& x, int d, SimResult const& rd, int r0Ticks, bool& budgetHit, int samples = 2,
+    acecore::Verdict verdictFor(Ctx const& x, int d, SimResult const& rd, int r0Ticks, bool& budgetHit, int samples = 2,
                                FollowUp const& base = FollowUp{}) {
         switch (rd.end) {
-            case SimEnd::OutOfBudget: return ibcore::Verdict::Budget;
-            case SimEnd::Survived:    return ibcore::Verdict::Good;
+            case SimEnd::OutOfBudget: return acecore::Verdict::Budget;
+            case SimEnd::Survived:    return acecore::Verdict::Good;
             case SimEnd::Truncated:
                 // Wave release (2.1): the path survived up to an orb / portal we
                 // can't see past - the release itself didn't kill you, so let it
                 // go. Holding it there kept the wave rising until the window ran
                 // out (late / "ignored" releases near portals and orbs).
-                if (!x.push && x.mode.wave && !x.mode.ship) return ibcore::Verdict::Good;
+                if (!x.push && x.mode.wave && !x.mode.ship) return acecore::Verdict::Good;
                 // Safe until an orb / portal we can't see past, and clearly further than frame 0.
-                return rd.ticks > r0Ticks + scaleTicks(6, x.s) ? ibcore::Verdict::Partial : ibcore::Verdict::Bad;
+                return rd.ticks > r0Ticks + scaleTicks(6, x.s) ? acecore::Verdict::Partial : acecore::Verdict::Bad;
             case SimEnd::Died:
             default: {
                 bool const esc = savableLater(x, d, rd, samples, budgetHit, base);
-                if (budgetHit) return ibcore::Verdict::Budget;
-                return esc ? ibcore::Verdict::Good : ibcore::Verdict::Bad;
+                if (budgetHit) return acecore::Verdict::Budget;
+                return esc ? acecore::Verdict::Good : acecore::Verdict::Bad;
             }
         }
+    }
+
+    // ------------------------------------------------------------------------
+    //  Click rate (presses per second), for the Raw Wave Spam threshold.
+    //  Game time is in 60fps frames, so 60 units = one second.
+    // ------------------------------------------------------------------------
+    void notePressRate(double now) {
+        m_pressAt[m_pressAtI] = now;
+        m_pressAtI = (m_pressAtI + 1) % PRESS_RATE_N;
+        if (m_pressAtN < PRESS_RATE_N) m_pressAtN++;
+    }
+
+    // Presses per second over the last second of presses; 0 while there are too
+    // few to judge (the first few taps of a burst are still corrected).
+    double pressCps() const {
+        int const n = std::min(m_pressAtN, PRESS_RATE_N);
+        if (n < 2) return 0.0;
+        int used = 0;
+        double oldest = 0.0, newest = 0.0;
+        for (int k = 0; k < n; k++) {
+            double const t = m_pressAt[(m_pressAtI - 1 - k + PRESS_RATE_N * 2) % PRESS_RATE_N];
+            if (m_gameTime - t > 60.0) break; // only the last second
+            if (used == 0) newest = t;
+            oldest = t;
+            used++;
+        }
+        if (used < 4) return 0.0;          // need a real burst before going raw
+        double const span = newest - oldest;
+        if (span < 12.0) return 0.0;       // under 0.2 s of data: not enough yet
+        return static_cast<double>(used - 1) * 60.0 / span;
     }
 
     // ------------------------------------------------------------------------
@@ -11299,6 +11312,7 @@ public:
         // Always record the true physical state first.
         m_physicalHolding = push;
         m_inputsSeen++;
+        if (push) notePressRate(m_gameTime); // for the Raw Wave Spam threshold
 
         // A pending accuracy check assumed no further input: drop it (a release
         // only counts where releasing changes the path).
@@ -11415,7 +11429,9 @@ public:
         // 1a. (2.3) Raw Wave Spam (Tools): in a wave stream every input goes in
         //      exactly as you made it - nothing held, nothing judged. One still
         //      held back from before the stream goes in first (order kept).
-        if (c.rawWaveSpam && mode.wave && inStream) {
+        //      Only above 7 clicks/s: at a normal wave rhythm the clicks are still
+        //      corrected, which is the point of the mod. (1.3.6)
+        if (c.rawWaveSpam && mode.wave && inStream && pressCps() >= RAW_SPAM_MIN_CPS) {
             if (m_queue.active()) flushQueue(pl);
             m_streamShift = 0.0;
             return pass(Decision::PassSpam);
@@ -11483,8 +11499,8 @@ public:
                 if (!helpOk) {
                     SimResult const now = runSim(ox, 0);
                     bool bh0 = false;
-                    ibcore::Verdict const v0 = verdictFor(ox, 0, now, -1000000, bh0);
-                    helpOk = now.end != SimEnd::OutOfBudget && v0 != ibcore::Verdict::Good;
+                    acecore::Verdict const v0 = verdictFor(ox, 0, now, -1000000, bh0);
+                    helpOk = now.end != SimEnd::OutOfBudget && v0 != acecore::Verdict::Good;
                 }
                 SimResult idle;
                 idle.end = SimEnd::OutOfBudget; // "not looked" unless the helper may act
@@ -11496,8 +11512,8 @@ public:
                     ring = idle.firstRing;
                     SimResult const atOrb = runSim(ox, k);
                     bool bh = false;
-                    ibcore::Verdict const v = verdictFor(ox, k, atOrb, -1000000, bh);
-                    if (!(v == ibcore::Verdict::Good || v == ibcore::Verdict::Partial)) k = -1;
+                    acecore::Verdict const v = verdictFor(ox, k, atOrb, -1000000, bh);
+                    if (!(v == acecore::Verdict::Good || v == acecore::Verdict::Partial)) k = -1;
                 } else if (idle.end == SimEnd::Truncated && idle.trunc.obj && isOrb(idle.trunc.type) &&
                            !isModelledOrb(idle.trunc.type) && idle.trunc.tick >= 0) {
                     // (2.2) Dash / spider / teleport / custom orbs: the prediction
@@ -11534,7 +11550,7 @@ public:
                     for (int& v : m_refuse) v = 0;
                     m_refuseHave = false;
                     m_last.liveTicks = -1;
-                    m_last.liveReason = ibcore::FireReason::None;
+                    m_last.liveReason = acecore::FireReason::None;
                     ClickNote n = base;
                     n.d = Decision::Buffered;
                     n.delay = k;
@@ -11563,8 +11579,8 @@ public:
                 auto okAt = [&](int d) {
                     SimResult const r = runSim(sx, d);
                     bool bh = false;
-                    ibcore::Verdict const v = verdictFor(sx, d, r, -1000000, bh);
-                    return v == ibcore::Verdict::Good || v == ibcore::Verdict::Partial;
+                    acecore::Verdict const v = verdictFor(sx, d, r, -1000000, bh);
+                    return v == acecore::Verdict::Good || v == acecore::Verdict::Partial;
                 };
                 // (2.3) On time first, presses and releases alike: an input in
                 // a stream goes in when you made it whenever that's safe, and
@@ -11673,7 +11689,7 @@ public:
 
         // 5. Frame 0 (immediate input).
         SimResult r0 = sim(0);
-        std::vector<ibcore::Point2> path0;
+        std::vector<acecore::Point2> path0;
         if (m_recordPath) path0 = m_path;
 
         bool discard = (r0.end == SimEnd::OutOfBudget); // result not trustworthy -> raw input
@@ -11713,7 +11729,7 @@ public:
         }
 
         // How good is the click if delayed by d ticks? (shared by the search and the probe)
-        auto eval = [&](int d) -> ibcore::Verdict {
+        auto eval = [&](int d) -> acecore::Verdict {
             SimResult rd = sim(d);
             if (m_thinkRec && m_thinkTests.size() < 24) m_thinkTests.emplace_back(d, m_path);
             if (rd.end == SimEnd::OutOfBudget && !cheap) {
@@ -11722,8 +11738,8 @@ public:
             }
             // one "could you still save it" sample per candidate (the first
             // test gets three): the search tries many delays.
-            ibcore::Verdict v = verdictFor(x, d, rd, r0.ticks, budgetHit, cheap ? -1 : 1);
-            if (v == ibcore::Verdict::Budget && !cheap && rd.end != SimEnd::OutOfBudget) {
+            acecore::Verdict v = verdictFor(x, d, rd, r0.ticks, budgetHit, cheap ? -1 : 1);
+            if (v == acecore::Verdict::Budget && !cheap && rd.end != SimEnd::OutOfBudget) {
                 enterCheap();
                 v = verdictFor(x, d, rd, r0.ticks, budgetHit, -1);
             }
@@ -11744,12 +11760,12 @@ public:
             int const pick = wavePick(pl, x, minDelay, maxDelay);
             if (pick > 0) {
                 m_rayPicks++;
-                if (eval(pick) == ibcore::Verdict::Good) {
+                if (eval(pick) == acecore::Verdict::Good) {
                     int d = pick;
                     evals++;
                     for (int k = 0; k < 3 && d - 1 >= minDelay; k++) {
                         evals++;
-                        if (eval(d - 1) != ibcore::Verdict::Good) break;
+                        if (eval(d - 1) != acecore::Verdict::Good) break;
                         d--;
                     }
                     bestDelay = d;
@@ -11764,7 +11780,7 @@ public:
             }
         }
         if (r0.end == SimEnd::Died && !escape0 && !discard && !rayDone) {
-            ibcore::SearchParams sp;
+            acecore::SearchParams sp;
             sp.maxDelay = maxDelay;
             sp.minDelay = minDelay;
             // Every tick near the click (narrow safe gaps live there), then a
@@ -11779,7 +11795,7 @@ public:
                 if (lm > 0) sp.margin = std::max(sp.margin, scaleTicks(lm, s));
             }
             sp.aim      = 0.f; // always the earliest safe tick
-            ibcore::SearchResult sr = ibcore::searchDelay(sp, eval);
+            acecore::SearchResult sr = acecore::searchDelay(sp, eval);
             evals = sr.evals;
             if (sr.budget) budgetHit = true;
             if (sr.delay == 0 && sr.budget) {
@@ -11827,13 +11843,13 @@ public:
                 // Log-only ("click was Nt too early"): kept cheap - 1/8 of the
                 // budget, 8 coarse candidates, no dense scan.
                 if (m_hasDeadline) m_deadline = Clock::now() + std::chrono::microseconds(std::max(300, budgetUs / 8));
-                ibcore::SearchParams pp;
+                acecore::SearchParams pp;
                 pp.minDelay = maxDelay + 1;
                 pp.maxDelay = probeMax;
                 pp.stride   = std::max(1, (probeMax - maxDelay + 7) / 8);
                 pp.dense    = 0;
                 pp.guard    = false;
-                ibcore::SearchResult pr = ibcore::searchDelay(pp, eval);
+                acecore::SearchResult pr = acecore::searchDelay(pp, eval);
                 needed = pr.earliest;
                 budgetHit = savedBudgetHit;
             }
@@ -11854,11 +11870,15 @@ public:
         //     re-planned live; a "no fix" click with a spot ahead that worked
         //     before is held for it.
         int spotNote = 0;
-        if (c.learnSpots && push && x.modern && maxDelay > 0 && m_spots.size() > 0 && !discard) {
-            ibcore::Spot const here = spotNow(pl, push, mode.name());
-            ibcore::SpotTol const tol = spotTol();
-            if (x.modern && (dec == Decision::PassSafe || dec == Decision::PassEscapable) &&
-                m_spots.at(here.x, here.y, here.vy, here.key, tol) == ibcore::SpotHit::Bad) {
+        // Session memory (Assists): the two "wait for a remembered spot" paths hold
+        // the input, which only preserves your line in modes where holding doesn't
+        // change the trajectory - so ship / wave skip them and keep the plain
+        // fire-on-the-spot behaviour from liveStep.
+        if (c.learnSpots && push && maxDelay > 0 && m_spots.size() > 0 && !discard && !mode.holdBased()) {
+            acecore::Spot const here = spotNow(pl, push, mode.name());
+            acecore::SpotTol const tol = spotTol();
+            if ((dec == Decision::PassSafe || dec == Decision::PassEscapable) &&
+                m_spots.at(here.x, here.y, here.vy, here.key, tol) == acecore::SpotHit::Bad) {
                 dec = Decision::Buffered;
                 bestDelay = std::max(1, bestDelay);
                 spotNote = 1;
@@ -11922,9 +11942,9 @@ public:
                 if (m_hasDeadline) m_deadline = Clock::now() + std::chrono::microseconds(budgetUs);
                 bool bh = false;
                 SimResult const r = sim(d);
-                ibcore::Verdict const v = verdictFor(x, d, r, -1000000, bh);
+                acecore::Verdict const v = verdictFor(x, d, r, -1000000, bh);
                 m_hasDeadline = false;
-                if (v != ibcore::Verdict::Good) continue;
+                if (v != acecore::Verdict::Good) continue;
                 float const cl = (r.clear < 1e8f) ? r.clear : 1e7f; // no hazard near = best
                 if (cl > best.clear + 0.5f) {
                     best = Pick{d, cl};
@@ -12053,7 +12073,7 @@ public:
             for (int& v : m_refuse) v = 0;
             m_refuseHave = false;
             m_last.liveTicks = -1;
-            m_last.liveReason = ibcore::FireReason::None;
+            m_last.liveReason = acecore::FireReason::None;
             if (mode.holdBased()) m_streamShift = static_cast<double>(bestDelay) * dt; // updated when it really fires
             return false;
         }
@@ -12072,7 +12092,7 @@ public:
         Config const& c = cfg();
         bool const wasFirst = m_liveState.first && !m_liveState.needInit;
 
-        std::vector<ibcore::Point2> path;
+        std::vector<acecore::Point2> path;
         std::string modeName;
         float simScale = 1.f;
         bool waveMode = false;
@@ -12082,7 +12102,7 @@ public:
         //    near-miss waits, waiting for a spot that worked before.
         //  * Inputs queued behind it (usually your release) only get the plain
         //    safety check, so your hold lengths / rhythm stay yours.
-        auto check = [&](bool push) -> ibcore::LiveVerdict {
+        auto check = [&](bool push) -> acecore::LiveVerdict {
             // Following the plan: on the predicted path, just wait for the plan
             // tick (it fires there through m_liveState.latest) - no prediction.
             // Presses and releases (2.1 - a held wave release was re-predicted
@@ -12090,24 +12110,24 @@ public:
             if (m_planTrust && m_liveState.first) {
                 if (!planDrifted(pl, now, dt)) {
                     m_planTicksSaved++;
-                    return ibcore::LiveVerdict::Unsafe; // "not yet"; the plan tick fires it
+                    return acecore::LiveVerdict::Unsafe; // "not yet"; the plan tick fires it
                 }
                 m_planTrust = false; // something the prediction didn't know: check for real
                 m_planDrifts++;
                 if (c.hudVerbose) pushLog("held click: you left the predicted path - checking every tick", COL_GREY, false);
             }
             Ctx x;
-            if (!makeCtx(pl, push, c, x)) return ibcore::LiveVerdict::OnSchedule;
+            if (!makeCtx(pl, push, c, x)) return acecore::LiveVerdict::OnSchedule;
             modeName = x.mode.name();
             simScale = x.s;
             waveMode = x.mode.wave;
-            if (!push && !x.mode.releaseMatters()) return ibcore::LiveVerdict::OnSchedule;
+            if (!push && !x.mode.releaseMatters()) return acecore::LiveVerdict::OnSchedule;
             bool const head = m_liveState.first;
             // Orb helper (2.1): fire the moment you touch the orb (or on the
             // predicted tick through m_liveState.latest).
             if (head && push && m_orbHelpHold) {
-                if (m_orbHelpRing && overlapsNow(pl->m_player1, m_orbHelpRing)) return ibcore::LiveVerdict::Proven;
-                return ibcore::LiveVerdict::Unsafe;
+                if (m_orbHelpRing && overlapsNow(pl->m_player1, m_orbHelpRing)) return acecore::LiveVerdict::Proven;
+                return acecore::LiveVerdict::Unsafe;
             }
             // Held for a learned spot: fire exactly when you reach it (no
             // prediction - it may be blind there), else keep waiting.
@@ -12119,9 +12139,9 @@ public:
                 float const tolX = spotTol().x;
                 if ((px - m_spotTargetX) * m_spotTargetDir >= -tolX) {
                     m_spotFires++;
-                    return ibcore::LiveVerdict::Proven;
+                    return acecore::LiveVerdict::Proven;
                 }
-                return ibcore::LiveVerdict::Unsafe;
+                return acecore::LiveVerdict::Unsafe;
             }
             PlayerObject* const p1 = pl->m_player1;
             // Cube-type press in the air does nothing until you land: never
@@ -12131,16 +12151,17 @@ public:
 
             // Learned spots first: firing on a spot that worked before repeats it;
             // a spot that killed you before is skipped whatever the sim says.
-            ibcore::Spot spotHere;
-            ibcore::SpotTol spotT;
-            bool const useSpots = x.modern && head && push && c.learnSpots &&
-                                  m_spots.size() > 0; // presses only; mini cube
+            acecore::Spot spotHere;
+            acecore::SpotTol spotT;
+            // Session memory: presses only, every gamemode (firing on a remembered
+            // spot doesn't move the input, so it keeps the line in ship / wave too).
+            bool const useSpots = head && push && c.learnSpots && m_spots.size() > 0;
             if (useSpots) {
                 spotHere = spotNow(pl, push, modeName);
                 spotT = spotTol();
-                ibcore::SpotHit const h = m_spots.at(spotHere.x, spotHere.y, spotHere.vy, spotHere.key, spotT);
-                if (h == ibcore::SpotHit::Good && !airPress) { m_spotFires++; return ibcore::LiveVerdict::Proven; }
-                if (h == ibcore::SpotHit::Bad)  { m_spotBlocks++; m_refuse[RF_SPOT]++; return ibcore::LiveVerdict::Unsafe; }
+                acecore::SpotHit const h = m_spots.at(spotHere.x, spotHere.y, spotHere.vy, spotHere.key, spotT);
+                if (h == acecore::SpotHit::Good && !airPress) { m_spotFires++; return acecore::LiveVerdict::Proven; }
+                if (h == acecore::SpotHit::Bad)  { m_spotBlocks++; m_refuse[RF_SPOT]++; return acecore::LiveVerdict::Unsafe; }
             }
 
             // The next input you already made (queued, exact) or, while you still
@@ -12183,7 +12204,7 @@ public:
             SimResult r = simAt(0);
             if (m_recordPath) path = m_path;
             bool budgetHit = false;
-            ibcore::Verdict const v = verdictFor(x, 0, r, -1000000, budgetHit, 2, gapAt(0));
+            acecore::Verdict const v = verdictFor(x, 0, r, -1000000, budgetHit, 2, gapAt(0));
             auto probe = [&](int d) {
                 bool const rec = m_recordPath;
                 m_recordPath = false; // keep the path of the "now" test
@@ -12194,7 +12215,8 @@ public:
 
             // Safe now, but a spot that worked before is coming within the window:
             // wait for it (repeat what you know works).
-            if (head && v == ibcore::Verdict::Good && useSpots && !airPress && m_p1Speed > 0.01f && m_liveState.deadline >= 0.0) {
+            if (head && v == acecore::Verdict::Good && useSpots && !airPress && !x.mode.holdBased() &&
+                m_p1Speed > 0.01f && m_liveState.deadline >= 0.0) {
                 float const reach = m_p1Speed * static_cast<float>(m_liveState.deadline - now - 2.0 * dt);
                 float const ahead = reach > 0.f
                     ? m_spots.goodAhead(spotHere.x, spotHere.y, spotHere.key, m_p1Dir, reach, spotT) : -1.f;
@@ -12206,7 +12228,7 @@ public:
                         m_hasDeadline = false;
                         m_liveWaitWhy = 2;
                         m_refuse[RF_AHEAD]++;
-                        return ibcore::LiveVerdict::Unsafe; // not yet
+                        return acecore::LiveVerdict::Unsafe; // not yet
                     }
                 }
             }
@@ -12214,12 +12236,12 @@ public:
             // If a clearly cleaner moment comes within a few steps, wait for it.
             // Presses only: release timing is your rhythm (wave / ship corridors are
             // always "close", so waiting there just shifts your release).
-            if (x.modern && head && push && v == ibcore::Verdict::Good && !budgetHit) {
+            if (x.modern && head && push && v == acecore::Verdict::Good && !budgetHit) {
                 float const target = clearTarget(modeName);
                 int const look = scaleTicks(CLEAN_LOOK_BASE, x.s);
                 double const deadline = m_liveState.deadline;
-                int const k = ibcore::cleanerAhead(r.clear, target, CLEAN_GAIN_PX, look, [&](int d) {
-                    ibcore::CleanProbe cp;
+                int const k = acecore::cleanerAhead(r.clear, target, CLEAN_GAIN_PX, look, [&](int d) {
+                    acecore::CleanProbe cp;
                     // leave room for the safe-in-a-row rule before the window ends
                     if (deadline >= 0.0 && now + static_cast<double>(d + 2) * dt >= deadline) { cp.stop = true; return cp; }
                     SimResult const rk = probe(d);
@@ -12234,20 +12256,20 @@ public:
                     m_liveWaited = true;
                     m_liveWaitWhy = 1;
                     m_refuse[RF_CLEAN]++;
-                    return ibcore::LiveVerdict::Unsafe; // not yet: a cleaner moment is coming
+                    return acecore::LiveVerdict::Unsafe; // not yet: a cleaner moment is coming
                 }
             }
             m_hasDeadline = false;
-            if (head && v == ibcore::Verdict::Bad) {
+            if (head && v == acecore::Verdict::Bad) {
                 if (r.end == SimEnd::Truncated) m_refuse[RF_CUT]++;
                 else m_refuse[RF_DIED]++;
                 if (!m_refuseHave && r.end == SimEnd::Died) { m_refuseFirst = r; m_refuseHave = true; }
             }
             switch (v) {
-                case ibcore::Verdict::Good:    return ibcore::LiveVerdict::Safe;
-                case ibcore::Verdict::Partial: return ibcore::LiveVerdict::SafeCut;
-                case ibcore::Verdict::Budget:  return ibcore::LiveVerdict::Unknown;
-                default:                       return ibcore::LiveVerdict::Unsafe;
+                case acecore::Verdict::Good:    return acecore::LiveVerdict::Safe;
+                case acecore::Verdict::Partial: return acecore::LiveVerdict::SafeCut;
+                case acecore::Verdict::Budget:  return acecore::LiveVerdict::Unknown;
+                default:                       return acecore::LiveVerdict::Unsafe;
             }
         };
         // The click itself keeps a one-tick margin off the deadly edge (not in wave).
@@ -12287,7 +12309,7 @@ public:
             return static_cast<double>(std::max(0, wt)) * dt;
         };
 
-        auto fired = ibcore::liveStep(m_queue, m_liveState, now, TIME_EPS, check, need, windowTime);
+        auto fired = acecore::liveStep(m_queue, m_liveState, now, TIME_EPS, check, need, windowTime);
         if (fired) {
             fireButton(pl, *fired);
             // (2.2) which hold it was, for the log: an orb wait used to say
@@ -12308,14 +12330,14 @@ public:
                 ModeInfo relMode;
                 relMode.add(pl->m_player1);
                 bool const onScheduleRelease = !*fired && ((relMode.ship && !relMode.wave) || relMode.robot);
-                bool const late = m_liveState.reason == ibcore::FireReason::Deadline && !onScheduleRelease;
+                bool const late = m_liveState.reason == acecore::FireReason::Deadline && !onScheduleRelease;
                 // Followed the plan to its tick: the normal case now, not a warning.
-                bool const followed = m_planTrust && m_liveState.reason == ibcore::FireReason::Plan;
+                bool const followed = m_planTrust && m_liveState.reason == acecore::FireReason::Plan;
                 if (followed) m_planFires++;
                 m_planTrust = false;
                 // Always shown: when the held click really went in, and why.
-                bool const onPlan = !followed && m_liveState.reason == ibcore::FireReason::Plan;
-                std::string const why = (holdWhy && m_liveState.reason == ibcore::FireReason::Proven) ? holdWhy
+                bool const onPlan = !followed && m_liveState.reason == acecore::FireReason::Plan;
+                std::string const why = (holdWhy && m_liveState.reason == acecore::FireReason::Proven) ? holdWhy
                                         : onScheduleRelease ? "on schedule"
                                                             : fireReasonText(m_liveState.reason);
                 pushLog(fmt::format("{} fired +{}t ({}){}{}", *fired ? "PRESS" : "REL", firedTicks, why,
@@ -12354,14 +12376,14 @@ public:
         return fmt::format("said no {}x: {}", total, parts);
     }
 
-    static char const* fireReasonText(ibcore::FireReason r) {
+    static char const* fireReasonText(acecore::FireReason r) {
         switch (r) {
-            case ibcore::FireReason::Safe:     return "safe";
-            case ibcore::FireReason::SafeCut:  return "safe up to an orb / portal";
-            case ibcore::FireReason::Schedule: return "on plan, couldn't check";
-            case ibcore::FireReason::Proven:   return "spot that worked before";
-            case ibcore::FireReason::Deadline: return "window ended, nothing safe found";
-            case ibcore::FireReason::Plan:     return "on plan";
+            case acecore::FireReason::Safe:     return "safe";
+            case acecore::FireReason::SafeCut:  return "safe up to an orb / portal";
+            case acecore::FireReason::Schedule: return "on plan, couldn't check";
+            case acecore::FireReason::Proven:   return "spot that worked before";
+            case acecore::FireReason::Deadline: return "window ended, nothing safe found";
+            case acecore::FireReason::Plan:     return "on plan";
             default:                           return "?";
         }
     }
@@ -12769,9 +12791,9 @@ inline std::string titleBadge() {
 //  back to GD's own font.
 // ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------
-//  Online users (2.2): how many people have Input Buffer and how many are
+//  Online users (2.2): how many people have Aceware and how many are
 //  playing right now, shown in the window header (green dot = online, grey =
-//  offline). Each game sends the Input Buffer server an anonymous random ID
+//  offline). Each game sends the Aceware server an anonymous random ID
 //  (made on first start, nothing else about you) every 2 minutes; the server
 //  answers with the totals. Off with the "Show Online Users" setting.
 //  ONLINE_URL (src/OnlineURL.hpp) is your Cloudflare Worker (see server/README.md); empty = off.
@@ -12827,7 +12849,7 @@ void sendOnlinePing() {
 
 // (2.3) Just the totals (no "I'm here"): cheap, so the numbers follow other
 // players coming and going between your own pings. Every version of the mod
-// (Input Buffer 2.2,) talks to the same server, so they all count.
+// (Aceware,) talks to the same server, so they all count.
 void fetchOnlineStats() {
     if (!onlineEnabled()) { s_online = OnlineStats{}; return; }
     web::WebRequest req;
@@ -12867,9 +12889,16 @@ bool s_onlineNow = false;    // set: fetch the totals right away (the window jus
 //  downloads that release's .geode over this one and asks you to restart.
 //  Nothing is downloaded unless you press it. Off: setting "Check For Updates".
 // ----------------------------------------------------------------------------
-constexpr char const* UPDATE_REPO = "bockatta/GD-Input-Buffer";
+//  Updates (1.4.0): on the main menu, once a session, the newest release of this
+//  mod's GitHub repo is looked up (GitHub's public API, no account). If it is
+//  newer, its .geode is downloaded and written over this one, and the game asks
+//  you to restart. Off with the "Auto Update" setting - nothing else here talks
+//  to the network.
+// ----------------------------------------------------------------------------
+constexpr char const* UPDATE_REPO = "fuzzyace/Aceware";
 struct UpdateState {
     bool checked = false, available = false, popupPending = false, downloading = false, done = false, failed = false;
+    bool restartPending = false; // written, waiting for the restart prompt
     std::string version, url;
 };
 UpdateState s_update;
@@ -12877,6 +12906,20 @@ UpdateState s_update;
 // it for the update's current state. false = the window isn't up (or you're
 // playing): nothing was shown.
 bool updatePopup(bool open);
+// After an update is written: ask for the restart that actually loads it. If there
+// is no scene to put a popup on (still booting) or a level is running, the flag
+// stays set and the main menu asks when it appears.
+void showRestartPrompt() {
+    if (!s_update.done || !s_update.restartPending) return;
+    if (PlayLayer::get()) return; // never over gameplay
+    if (!CCDirector::get() || !CCDirector::get()->getRunningScene()) return;
+    s_update.restartPending = false;
+    geode::createQuickPopup("Aceware updated",
+                            fmt::format("Aceware {} is installed.\nRestart the game to use it?", s_update.version),
+                            "Later", "Restart", [](FLAlertLayer*, bool restart) {
+                                if (restart) geode::utils::game::restart(true);
+                            });
+}
 void startUpdate() {
     if (s_update.url.empty() || s_update.downloading || s_update.done) return;
     s_update.downloading = true;
@@ -12889,30 +12932,40 @@ void startUpdate() {
     req.followRedirects(true);
     req.timeout(std::chrono::seconds(60));
     async::spawn(req.get(s_update.url), [](web::WebResponse res) {
-        s_update.downloading = false;
-        if (!res.ok() || res.data().size() < 1024) {
-            s_update.failed = true;
-            if (!updatePopup(false)) {
-                Notification::create("Aceware: the update didn't download - try again later", NotificationIcon::Error, 2.5f)->show();
-            }
-            return;
-        }
-        // over this mod's own .geode (written to a temporary file first)
+        // Worker thread: only the download and the file write happen here; every
+        // cocos / notification call is marshalled back to the main thread.
+        bool const ok = res.ok() && res.data().size() >= 1024;
+        bool wrote = false;
         auto const path = Mod::get()->getPackagePath();
-        auto const w = geode::utils::file::writeBinarySafe(path, res.data());
-        if (!w) {
-            s_update.failed = true;
-            log::error("[Aceware] update: couldn't write {}", path.string());
-            if (!updatePopup(false)) Notification::create("Aceware: couldn't save the update", NotificationIcon::Error, 2.5f)->show();
-            return;
+        if (ok) {
+            auto const w = geode::utils::file::writeBinarySafe(path, res.data());
+            wrote = static_cast<bool>(w);
+            if (!wrote) log::error("[Aceware] update: couldn't write {}", path.string());
         }
-        s_update.done = true;
-        log::info("[Aceware] updated to {} ({})", s_update.version, path.string());
-        // installed: the box asks you to restart (opened again if you'd closed it)
-        if (!updatePopup(true)) {
-            Notification::create(fmt::format("Aceware {} is installed - restart the game to use it", s_update.version),
-                                 NotificationIcon::Success, 3.f)->show();
-        }
+        Loader::get()->queueInMainThread([ok, wrote, path] {
+            s_update.downloading = false;
+            if (!ok) {
+                s_update.failed = true;
+                if (!updatePopup(false)) {
+                    Notification::create("Aceware: the update didn't download - try again later", NotificationIcon::Error, 2.5f)->show();
+                }
+                return;
+            }
+            if (!wrote) {
+                s_update.failed = true;
+                if (!updatePopup(false)) Notification::create("Aceware: couldn't save the update", NotificationIcon::Error, 2.5f)->show();
+                return;
+            }
+            s_update.done = true;
+            s_update.restartPending = true;
+            log::info("[Aceware] updated to {} ({})", s_update.version, path.string());
+            updatePopup(true);   // refresh the window's box if it is open
+            showRestartPrompt(); // Restart / Later; falls back to a notification
+            if (s_update.restartPending) {
+                Notification::create(fmt::format("Aceware {} is installed - restart the game to use it", s_update.version),
+                                     NotificationIcon::Success, 3.f)->show();
+            }
+        });
     });
 }
 void checkForUpdate() {
@@ -12929,17 +12982,23 @@ void checkForUpdate() {
         if (!j) return;
         std::string const tagStr = (*j)["tag_name"].asString().unwrapOr("");
         if (tagStr.empty()) return;
-        auto v = VersionInfo::parse(tagStr);
+        // tags are written "v1.4.0"; VersionInfo wants the bare semver
+        std::string tag = tagStr;
+        if (tag.size() > 1 && (tag[0] == 'v' || tag[0] == 'V')) tag.erase(tag.begin());
+        auto v = VersionInfo::parse(tag);
         if (!v || !(*v > Mod::get()->getVersion())) return;
         for (auto const& a : (*j)["assets"]) {
             std::string const name = a["name"].asString().unwrapOr("");
             std::string const url = a["browser_download_url"].asString().unwrapOr("");
             if (!url.empty() && name.size() > 6 && name.ends_with(".geode")) {
-                s_update.available = true;
-                s_update.version = tagStr;
-                s_update.url = url;
-                s_update.popupPending = true;
                 log::info("[Aceware] update available: {} ({})", tagStr, name);
+                // Main thread: touch the state, then install it straight away.
+                Loader::get()->queueInMainThread([tagStr, url] {
+                    s_update.available = true;
+                    s_update.version = tagStr;
+                    s_update.url = url;
+                    startUpdate();
+                });
                 return;
             }
         }
@@ -13080,11 +13139,11 @@ inline CCNode* roundBox(float w, float h, float r, ccColor3B col, GLubyte op = 2
 }
 } // namespace aa
 
-class IBLabel : public CCLabelBMFont {
+class AceLabel : public CCLabelBMFont {
 public:
     float m_k = 1.f; // drawn scale = asked scale * m_k
 
-    static char const* fontFile() { return "ibFont.fnt"_spr; }
+    static char const* fontFile() { return "aceFont.fnt"_spr; }
     static bool fontReady() {
         static int ok = -1;
         if (ok < 0) {
@@ -13111,10 +13170,10 @@ public:
         return big ? kBig : kChat;
     }
     // `gdFont`: "bigFont.fnt" or "chatFont.fnt" - which GD font's sizes the caller uses
-    static IBLabel* make(char const* text, char const* gdFont) {
+    static AceLabel* make(char const* text, char const* gdFont) {
         bool const big = std::strcmp(gdFont, "bigFont.fnt") == 0;
         bool const mine = fontReady();
-        auto* l = new IBLabel();
+        auto* l = new AceLabel();
         if (!l->initWithString(text, mine ? fontFile() : gdFont, -1.f, kCCTextAlignmentLeft, CCPoint{0.f, 0.f})) {
             return nullptr; // (cocos frees a label whose init fails)
         }
@@ -13647,13 +13706,13 @@ protected:
         }
 
         // ---- sidebar header (2.2), centred: ACEWARE in neon (each letter
-        // lights up under the mouse; the O is a ring galaxy), "INPUT BUFFER"
+        // lights up under the mouse; the O is a ring galaxy), "ACEWARE"
         // under it, then the version - glowing too (5 quick clicks: Dev tab) -
         // and the author on one line.
         float const sideMid = (SIDE_W + 4.f) / 2.f; // the sidebar panel's middle
         // ACEWARE and V2.2 side by side, the author under them, all centred
         std::string const badge = titleBadge();
-        auto* v2 = IBLabel::make(badge.c_str(), "bigFont.fnt");
+        auto* v2 = AceLabel::make(badge.c_str(), "bigFont.fnt");
         v2->setScale(0.28f);
         m_badgeW = v2->getContentSize().width * v2->getScale();
         constexpr float VER_GAP = 4.f;
@@ -13716,7 +13775,7 @@ protected:
         m_body->addChild(sideLine2, 2);
         std::string const sys = (systemInfo().side.empty() || systemInfo().brief.rfind("Wine", 0) == 0)
                                     ? systemInfo().brief : systemInfo().side;
-        m_platform = IBLabel::make(sys.c_str(), "chatFont.fnt");
+        m_platform = AceLabel::make(sys.c_str(), "chatFont.fnt");
         m_platform->setScale(0.42f);
         limitNodeWidth(m_platform, SIDE_W - 14.f, 0.42f, 0.2f);
         m_platform->setColor(C_MUTED);
@@ -13724,7 +13783,7 @@ protected:
         m_body->addChild(m_platform, 2);
 
         // ---- page header: page name on the left, status pill + close on the right ----
-        m_pageTitle = IBLabel::make("", "bigFont.fnt");
+        m_pageTitle = AceLabel::make("", "bigFont.fnt");
         m_pageTitle->setScale(0.4f);
         m_pageTitle->setColor(aw::themed(ccColor3B{255, 255, 255}));
         m_pageTitle->setAnchorPoint({0.f, 0.5f});
@@ -13822,26 +13881,26 @@ protected:
 
         // Row label pool.
         for (int i = 0; i < visibleRows(); i++) {
-            auto* l = IBLabel::make("", "chatFont.fnt");
+            auto* l = AceLabel::make("", "chatFont.fnt");
             l->setAnchorPoint({0.f, 1.f});
             l->setScale(0.5f);
             l->setPosition({PAD + 1.f, contentTop() - static_cast<float>(i) * LINE_H});
             m_page->addChild(l, 2);
             m_rows.push_back(l);
-            auto* r = IBLabel::make("", "chatFont.fnt");
+            auto* r = AceLabel::make("", "chatFont.fnt");
             r->setAnchorPoint({1.f, 1.f});
             r->setScale(0.5f);
             r->setPosition({W - PAD - SCROLL_W - 2.f, contentTop() - static_cast<float>(i) * LINE_H});
             m_page->addChild(r, 2);
             m_rowsR.push_back(r);
-            auto* h = IBLabel::make("", "bigFont.fnt");
+            auto* h = AceLabel::make("", "bigFont.fnt");
             h->setAnchorPoint({0.f, 0.5f});
             h->setScale(0.3f);
             h->setColor(aw::themed(ccColor3B{255, 255, 255}));
             h->setPosition({PAD + 1.f, contentTop() - static_cast<float>(i) * LINE_H - LINE_H / 2.f});
             m_page->addChild(h, 2);
             m_rowsH.push_back(h);
-            auto* tl = IBLabel::make("", "chatFont.fnt");
+            auto* tl = AceLabel::make("", "chatFont.fnt");
             tl->setAnchorPoint({1.f, 1.f});
             tl->setScale(0.42f);
             tl->setColor(C_DIM);
@@ -14006,7 +14065,7 @@ protected:
         p->setPosition({x + 0.6f, y + 0.6f});
         m_cards->addChild(p);
         if (titleText && *titleText) {
-            auto* t = IBLabel::make(titleText, "bigFont.fnt");
+            auto* t = AceLabel::make(titleText, "bigFont.fnt");
             t->setScale(0.28f);
             t->setColor(C_LAV);
             t->setAnchorPoint({0.f, 0.5f});
@@ -14014,7 +14073,7 @@ protected:
             m_settingsLabels->addChild(t);
         }
         if (!hint.empty()) {
-            auto* hl = IBLabel::make(hint.c_str(), "chatFont.fnt");
+            auto* hl = AceLabel::make(hint.c_str(), "chatFont.fnt");
             hl->setScale(0.4f);
             hl->setColor(aw::themed(ccColor3B{255, 255, 255}));
             hl->setAnchorPoint({1.f, 0.5f});
@@ -14111,23 +14170,23 @@ protected:
     // Text (2.2): headings (title, page name, card titles) stay in GD's bold
     // font; labels and buttons use the clean one. Sizes are given in bigFont
     // terms - chatFont is about half as big, so it's drawn at 2x.
-    static constexpr float BODY_K = 1.f; // (sizes are bigFont sizes; IBLabel converts)
+    static constexpr float BODY_K = 1.f; // (sizes are bigFont sizes; AceLabel converts)
     static CCLabelBMFont* bodyLabel(char const* text, float bigScale, ccColor3B col = {255, 255, 255}) {
-        auto* l = IBLabel::make(text, "bigFont.fnt");
+        auto* l = AceLabel::make(text, "bigFont.fnt");
         l->setScale(bigScale);
         l->setColor(col);
         return l;
     }
     static float textWidth(char const* text, float scale) {
-        auto* l = IBLabel::make(text, "bigFont.fnt");
+        auto* l = AceLabel::make(text, "bigFont.fnt");
         l->setScale(scale);
         return l->getContentSize().width * l->getScale();
     }
-    // Geode's limitNodeWidth, aware of IBLabel's size conversion (shadows it in the window).
+    // Geode's limitNodeWidth, aware of AceLabel's size conversion (shadows it in the window).
     static void limitNodeWidth(CCNode* n, float width, float def, float minScale) {
         if (!n) return;
         float k = 1.f;
-        if (auto* l = typeinfo_cast<IBLabel*>(n)) k = l->m_k;
+        if (auto* l = typeinfo_cast<AceLabel*>(n)) k = l->m_k;
         float const cw = n->getContentSize().width * k;
         float sc = def;
         if (cw > 0.f && def * cw > width) sc = width / cw;
@@ -14196,7 +14255,7 @@ protected:
             auto* node = CCNode::create();
             node->setContentSize({bw, bh});
             std::string const badge = titleBadge();
-            auto* v2 = IBLabel::make(badge.c_str(), "bigFont.fnt");
+            auto* v2 = AceLabel::make(badge.c_str(), "bigFont.fnt");
             v2->setScale(0.28f);
             v2->setColor(C_MUTED);
             v2->setPosition({bw / 2.f, bh / 2.f - 0.3f});
@@ -14379,7 +14438,7 @@ protected:
         m_forceRefresh = false;
         refreshOnline(force);
         std::string head = s_sim.headerLine();
-        if (head.rfind("INPUT BUFFER  ", 0) == 0) head = head.substr(14); // the title already says it
+        if (head.rfind("ACEWARE  ", 0) == 0) head = head.substr(9); // the title already says it
         if (force || head != m_shownHeader) {
             m_shownHeader = head;
             m_header->setString(head.c_str());
@@ -14404,7 +14463,7 @@ protected:
                 }
             }
         }
-        std::string const foot = toggleHint(); // was the status line ("INPUT BUFFER  EXTREME" ...) before 2.1
+        std::string const foot = toggleHint(); // was the status line ("ACEWARE  EXTREME" ...) before 2.1
         if (force || foot != m_shownFooter || m_shownFooterTab != m_tab) {
             m_shownFooterTab = m_tab;
             m_shownFooter = foot;
@@ -14712,7 +14771,7 @@ protected:
         if (std::string const k = cycleKeyName(); !k.empty()) cycleHint = k + " cycles stages";
 #endif
         card(lx, 146.f, W - 2.f * PAD, 46.f, "Stage", cycleHint);
-        char const* labels[] = {"Off", "1", "2", "3", "4", "Extreme", "Custom"};
+        char const* labels[] = {"Off", "1", "2", "3", "4", "Extreme (buggy)", "Custom"};
         constexpr float BTN_H = 13.f, BTN_GAP = 4.f, BTN_TEXT = 0.27f;
         std::vector<float> widths;
         float total = 0.f;
@@ -15034,7 +15093,7 @@ protected:
     //  YOUR STATS  this level / all levels, saved between sessions
     //  REPORT      export everything to a file (and the clipboard) to send
     void toolsLine(float x, float y, std::string const& text, ccColor3B col, float maxW, float scale = 0.42f) {
-        auto* l = IBLabel::make(text.c_str(), "chatFont.fnt");
+        auto* l = AceLabel::make(text.c_str(), "chatFont.fnt");
         l->setScale(scale);
         l->setColor(col);
         l->setAnchorPoint({0.f, 0.5f});
@@ -15054,12 +15113,14 @@ protected:
         card(lx, 72.f, lw, 120.f, "Assists");
         rowToggle(lx + 4.f, 170.f, lw - 8.f, "Orb Helper", "An early click waits for the orb, goes in on touch",
                   "orb-helper", true);
-        rowToggle(lx + 4.f, 151.f, lw - 8.f, "Raw Wave Spam", "Wave spam goes in exactly as you click, untouched",
+        rowToggle(lx + 4.f, 151.f, lw - 8.f, "Raw Wave Spam", "Above 7 clicks/s in wave: goes in exactly as you click",
                   "raw-wave-spam", false);
         rowToggle(lx + 4.f, 132.f, lw - 8.f, "Hitboxes", "Your box (spikes) and inner box (blocks)",
                   "show-hitboxes", false);
         rowToggle(lx + 4.f, 113.f, lw - 8.f, "Show Rays", "Your hitbox, press / release paths, the pathfinder",
                   "show-rays", false);
+        rowToggle(lx + 4.f, 94.f, lw - 8.f, "Session Memory", "Repeats the clicks that worked, this level only",
+                  "session-memory", true);
 
 
         // -- Your Stats (left, 18..66)
@@ -15156,7 +15217,7 @@ protected:
     void buildVersionGlow(float cx, float cy) {
         float const pad = 7.f;
         std::string const badge = titleBadge();
-        auto* src = IBLabel::make(badge.c_str(), "bigFont.fnt");
+        auto* src = AceLabel::make(badge.c_str(), "bigFont.fnt");
         src->setScale(0.28f);
         float const w = src->getContentSize().width * src->getScaleX() + 2.f * pad;
         float const h = src->getContentSize().height * src->getScaleY() + 2.f * pad;
@@ -15197,7 +15258,7 @@ protected:
         m_wordLeft = x;
         for (int i = 0; word[i]; i++) {
             char const ch[2] = {word[i], 0};
-            auto* l = IBLabel::make(ch, "bigFont.fnt");
+            auto* l = AceLabel::make(ch, "bigFont.fnt");
             l->setScale(sc);
             l->setColor(aw::themed(ccColor3B{232, 240, 236}));
             l->setAnchorPoint({0.5f, 0.5f});
@@ -15239,7 +15300,7 @@ protected:
                 // the glow: this letter drawn on its own and blurred, twice
                 float const pad = 9.f;
                 float const bw = w + 2.f * pad, bh = h + 2.f * pad;
-                auto* src = IBLabel::make(ch, "bigFont.fnt");
+                auto* src = AceLabel::make(ch, "bigFont.fnt");
                 src->setScale(sc);
                 src->setAnchorPoint({0.5f, 0.5f});
                 src->setPosition({bw / 2.f, bh / 2.f});
@@ -15842,7 +15903,7 @@ protected:
             line1 = fmt::format("Aceware {} is out (you have {}).", s_update.version, cur);
             line2 = "It downloads from Aceware's GitHub.";
         }
-        auto* t = IBLabel::make(head.c_str(), "bigFont.fnt");
+        auto* t = AceLabel::make(head.c_str(), "bigFont.fnt");
         t->setScale(0.4f);
         t->setColor(C_LAV);
         limitNodeWidth(t, cw - 16.f, 0.4f, 0.2f);
@@ -16011,7 +16072,7 @@ public:
 };
 #elif defined(GEODE_IS_MACOS)
 // Window Key (macOS): from GD's key handling, in every scene. (Android has no
-// keyboard: the pause menu's Input Buffer button shows / hides the window.)
+// keyboard: the pause menu's Aceware button shows / hides the window.)
 static bool isRemoveClickKey(enumKeyCodes key) {
     auto const binds = Mod::get()->getSettingValue<std::vector<Keybind>>("remove-click-key");
     for (Keybind const& b : binds) if (b.key == key) return true;
@@ -16112,7 +16173,7 @@ class $modify(BufPauseLayer, PauseLayer) {
         float const w = spr->getContentSize().width;
         if (w > 0.f) spr->setScale(target / w);
         auto* btn = CCMenuItemExt::createSpriteExtra(spr, [](CCMenuItemSpriteExtra*) { BufferWindow::toggle(); });
-        btn->setID("input-buffer-button"_spr);
+        btn->setID("aceware-button"_spr);
         if (menu) {
             menu->addChild(btn);
             menu->updateLayout();
@@ -16124,9 +16185,9 @@ class $modify(BufPauseLayer, PauseLayer) {
                     CCEaseInOut::create(CCScaleTo::create(1.15f, base * 1.07f), 1.7f),
                     CCEaseInOut::create(CCScaleTo::create(1.15f, base), 1.7f), nullptr)));
             }
-            log::info("[InputBuffer] pause button added to right-button-menu");
+            log::info("[Aceware] pause button added to right-button-menu");
         } else {
-            log::info("[InputBuffer] no right-button-menu in the pause menu - button placed bottom-left");
+            log::info("[Aceware] no right-button-menu in the pause menu - button placed bottom-left");
             // no such menu (another mod moved things): our own, bottom-left
             auto* m = CCMenu::create();
             m->addChild(btn);
@@ -16163,7 +16224,7 @@ $on_mod(Loaded) {
     queueInMainThread([] {
         if (auto* p = OnlineCounter::create()) OverlayManager::get()->addChild(p);
     });
-    log::info("[InputBuffer] loaded");
+    log::info("[Aceware] loaded");
 }
 
 
@@ -16205,7 +16266,8 @@ class $modify(AceOnlineDelegate, AppDelegate) {
 class $modify(BufMenuLayer, MenuLayer) {
     bool init() {
         if (!MenuLayer::init()) return false;
-        checkForUpdate(); // (2.3) once a session
+        checkForUpdate();    // on opening the game: once a session
+        showRestartPrompt(); // an update installed before the menu was up
         if (Mod::get()->getSavedValue<bool>("window-shown", true)) {
             Loader::get()->queueInMainThread([] { windowEnsure(); });
         }

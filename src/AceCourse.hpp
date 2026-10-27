@@ -20,7 +20,7 @@
 #include <deque>
 #include <vector>
 
-namespace ncourse {
+namespace acecourse {
 
 constexpr float SPEED = 6.f;       // blocks per second
 constexpr float DX    = 0.05f;     // path step (blocks)
@@ -585,4 +585,4 @@ struct Course {
     void shift(float dx) { for (auto& s : segs) s.shift(dx); }
 };
 
-} // namespace ncourse
+} // namespace acecourse

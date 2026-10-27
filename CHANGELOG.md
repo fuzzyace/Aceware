@@ -3,6 +3,72 @@
 All notable changes to Aceware. Version numbers follow `mod.json`; the in-game badge shows the
 short form (`v1.3` for `1.3.0`).
 
+## 1.4.3
+
+- An update now ends in a prompt: Aceware updated / Aceware <ver> is installed. Restart the game to
+  use it? with **Later** and **Restart**. Restart calls the game's own restart, so the new build loads
+  immediately instead of waiting for the next launch.
+- The check runs when the main menu appears, i.e. on opening the game; if the download finishes before there
+  is a scene to put the prompt on, the menu asks as soon as it exists. It never pops over a level - there
+  you get a notification and the prompt waits.
+
+## 1.4.2
+
+- Extreme is marked **(Buggy)** everywhere you meet it: the Stage tab button reads "Extreme (buggy)",
+  the line under the stage buttons says "EXTREME: 20 frames (12 wave, 2 ship) - BUGGY", the in-game
+  status pill reads "EXTREME (BUGGY)", the F6 notification carries the warning, and the stage
+  setting's description says it too. It is still selectable - the label is a warning, not a lock.
+## 1.4.1
+
+Naming sweep: the only names anywhere in the repo are Aceware and Ace.
+
+- the status banner reads `ACEWARE  STAGE 2`, and the window strips the matching 9-character prefix
+- Geode log lines use the `[Aceware]` tag; the pause-menu button's node ID is `aceware-button`
+- the bundled font resource is `aceFont`, and the source header, README, `about.md`, `mod.json`'s
+  description and this file no longer reference the earlier project at all
+- internal identifiers follow the same rule: the namespaces, the label class, the snapshot macros and
+  the saved-run header all carry Aceware's name now
+
+## 1.4.0
+
+Auto-update.
+
+- On the main menu, once a session, Aceware asks GitHub for `fuzzyace/Aceware`'s latest release. If its
+  tag is newer than the installed version, it downloads that release's `.geode` and writes it over the
+  installed one, then tells you to restart. No buttons to press.
+- New setting **Auto Update** (on by default). Turn it off and the mod makes no network requests at all.
+- The check used to point at a different project's repository, so its download could have replaced
+  Aceware with another mod; it also read a `check-updates` key that `mod.json` never declared. Both
+  fixed.
+- The download's UI work now happens on the main thread; before, notifications and the window were
+  touched from the web worker that fetched the file.
+- Tags are parsed with their leading `v` stripped (`v1.4.0`), so version comparison actually works.
+
+## 1.3.6
+
+- **Raw Wave Spam now only takes over above 7 clicks/s.** Below that the wave is corrected like every
+  other mode, so a normal wave rhythm still gets its clicks fixed. The rate is measured from your last
+  several presses (over the last second, needing at least four to judge), and resets each attempt, so
+  the first taps of a burst are still corrected before it goes raw.
+- The Assists description for the toggle says so: "Above 7 clicks/s in wave: goes in exactly as you
+  click".
+
+## 1.3.5
+
+Session memory — the mod now remembers the clicks that worked, for that level, until you leave it.
+
+- Every press that gets you through is remembered by where it landed (position, vertical speed,
+  gamemode, gravity). On later attempts a click at the same spot fires straight away instead of being
+  re-decided, and a spot that killed you before is held and re-planned rather than repeated.
+- It is memory, not a file: nothing is written to disk, and opening the level again starts empty. The
+  old per-level `spots/*.txt` files are no longer read or written.
+- Assists tab has a **Session Memory** toggle (on by default). Turning it off forgets the level on the
+  spot.
+- Ship and wave only use the "fire on a remembered spot" half: the other two halves hold the input,
+  and holding changes the line in those modes, so they skip them.
+- Recording now covers every gamemode, not just mini cube, because the memory can't outlive the level
+  and go stale.
+
 ## 1.3.4
 
 - The corner resize mark is now invisible until you actually drag the corner. It was drawn at rest

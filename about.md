@@ -1,6 +1,6 @@
 # Aceware
 
-Input buffer for Geometry Dash.
+Holds an early click back and fires it on the first tick that survives.
 
 Click a hair too early? Instead of dying, the click waits for a tick where it actually survives, then goes through. Clicks only ever move later, never earlier, and nothing is pressed for you.
 
@@ -39,7 +39,7 @@ Frames are 60fps frames (1 frame = 16.7 ms).
 | Stage 2 | 2 | 2 | 2 |
 | Stage 3 | 3 | 2 | 3 |
 | Stage 4 | 5 | 2 | 4 |
-| Extreme | 20 | 2 | 12 |
+| Extreme (buggy) | 20 | 2 | 12 |
 | Custom | yours | yours | yours |
 
 ## How it decides

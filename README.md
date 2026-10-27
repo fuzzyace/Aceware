@@ -2,17 +2,17 @@
 
 <img src="logo.png" width="140" align="right" alt="Aceware logo">
 
-An input buffer for **Geometry Dash** (Geode mod). Click a hair too early and instead of dying, the
+**Aceware**, a Geode mod for **Geometry Dash**. Click a hair too early and instead of dying, the
 click waits for a tick where it actually survives, then goes through.
 
 - **Windows**, Geometry Dash **2.2081**, Geode **5.11.2**
-- Version **1.3.4**
+- Version **1.4.3**
 - No network calls, no telemetry, no update checks.
 
 ## Install
 
 1. Install [Geode](https://geode-sdk.org/install/) for Geometry Dash 2.2081.
-2. Download `release/Aceware-1.3.4.geode`.
+2. Download `release/Aceware-1.4.3.geode`.
 3. Drop it into `Geometry Dash/geode/mods/`, or drag it onto the game window.
 4. Start the game and enable **Aceware** in the Geode mod list.
 
@@ -49,7 +49,7 @@ Frames are 60fps frames (1 frame = 16.7 ms). Ticks are GD's physics steps (240 p
 | Stage 2 | 2 | 2 | 2 |
 | Stage 3 | 3 | 2 | 3 |
 | Stage 4 | 5 | 2 | 4 |
-| Extreme | 20 | 2 | 12 |
+| Extreme (buggy) | 20 | 2 | 12 |
 | Custom | yours | yours | yours |
 
 ## How it decides

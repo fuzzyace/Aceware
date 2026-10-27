@@ -3,14 +3,14 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.3.4",
+	"version": "v1.4.3",
 	"id": "ace.aceware",
 	"name": "Aceware",
 	"developer": "Ace",
-	"description": "Input buffer for Geometry Dash. Your click waits for the first tick it survives instead of killing you.",
+	"description": "Your click waits for the first tick it survives instead of killing you.",
 	"resources": {
 		"fonts": {
-			"ibFont": {
+			"aceFont": {
 				"path": "resources/fonts/Poppins-Bold.ttf",
 				"size": 48,
 				"charset": "32-126"
@@ -21,7 +21,7 @@
 		"stage": {
 			"type": "string",
 			"name": "Stage",
-			"description": "How far ahead a click can be saved. Off is raw input; each stage is a wider window. F6 cycles.",
+			"description": "How far ahead a click can be saved. Off is raw input; each stage is a wider window. F6 cycles. Extreme is buggy - expect problems.",
 			"default": "Stage 2",
 			"one-of": [
 				"Off",
@@ -85,6 +85,12 @@
 				"slider": true,
 				"slider-step": 0.05
 			}
+		},
+		"check-updates": {
+			"type": "bool",
+			"name": "Auto Update",
+			"description": "On the main menu, checks this mod's GitHub for a newer release and installs it. The game then asks you to restart. This is the only network call Aceware makes.",
+			"default": true
 		},
 		"predict-portals": {
 			"type": "bool",

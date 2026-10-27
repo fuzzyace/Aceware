@@ -2,7 +2,7 @@
 
 Written 2026-10-25 for picking this project up in another chat or with another model.
 Reconciled 2026-10-26 against the real tree — §2, §3, §7, §8 and §9 had drifted after the workspace
-was collapsed from `Downloads\GDbuffer` into this single folder.
+was collapsed from an older multi-folder layout into this single folder.
 
 > **Housekeeping, unresolved:** this file was meant to stay out of the public repo, but it is tracked
 > and was pushed in the initial upload. Decide and act: `git rm --cached HANDOFF.md` plus a
@@ -15,10 +15,10 @@ was collapsed from `Downloads\GDbuffer` into this single folder.
 
 Aceware is a **Geode mod for Geometry Dash 2.2081 (Windows)** that buffers input: if you click
 slightly early, the click is held and fired on the first tick where the hidden simulated player
-survives. Mod id `ace.aceware`, developer `Ace`, current version **v1.3.4** (`mod.json` is the single
+survives. Mod id `ace.aceware`, developer `Ace`, current version **v1.4.3** (`mod.json` is the single
 source of truth; the in-game badge is derived from it at runtime).
 
-It started as a derivative of the upstream project *Nova / Input Buffer by AlQuerez23*, which is
+It started as a derivative of an earlier project of the same kind, which is
 **intentionally scrubbed from the tree** (name, strings, comments, header filenames, identifiers).
 Do not reintroduce that name.
 
@@ -26,7 +26,7 @@ Do not reintroduce that name.
 
 ## 2. Folder map (workspace root = `C:\Users\ariel\Aceware`)
 
-The old `Downloads\GDbuffer\` split — pristine upstream clone + `NovaPrime\` build mirror + `Aceware\`
+The old split — an untouched upstream clone + a separate build mirror + the public repo folder —
 public folder — is **gone**. This folder is the working tree *and* the public repo, and it builds in
 place. The pristine upstream clone is gone too, so diffs against upstream are no longer possible
 locally; keep edits small and read them back.
@@ -43,7 +43,7 @@ Aceware\                                  repo root = workspace = build root
 ├─ resources\fonts\                        Poppins-Bold.ttf + OFL.txt
 ├─ tools\local-build.ps1                   the offline build (expects ..\..\toolchain)
 ├─ .github\workflows\build.yml             CI: build + artifact upload (no release job)
-├─ release\Aceware-1.3.4.geode             shipped binary
+├─ release\Aceware-1.4.3.geode             shipped binary
 ├─ CMakeLists.txt                          standard Geode build (the CI path)
 ├─ mod.json                                version single source of truth
 ├─ README.md, CHANGELOG.md, about.md, logo.png
@@ -86,7 +86,7 @@ binding sources).
 
 **Packaging.** There is no `package.ps1` in this tree. A `.geode` is just a zip whose root holds the
 DLL, the manifest, `about.md` and `resources\` — exactly the five entries inside
-`release\Aceware-1.3.4.geode`:
+`release\Aceware-1.4.3.geode`:
 
 ```
 about.md    ace.aceware.dll    mod.json    resources\fonts\OFL.txt    resources\fonts\Poppins-Bold.ttf
@@ -157,9 +157,18 @@ Entry point is `TrajectoryBufferSim` (§7 of `main.cpp`). Per input:
    8 ticks (`if (!push && c.extreme) maxDelay = min(maxDelay, scaleTicks(8, s))`).
 10. Logs: `ClickNote` + `pushLog` feed the window and the console log.
 
-**No learned memory:** `Config::load()` forces `c.learnSpots = false`. All spot/attempt-memory paths are
-gated on that flag, so they are dormant. There is no level scan UI and `ScanRunner` is never spawned
-(the engine code still exists but is unreachable).
+**Session memory (v1.3.5):** `Config::load()` reads the saved value `session-memory` (default true,
+Assists tab toggle) into `c.sessionMemory`, and `c.learnSpots` follows it. Every press that survives
+is recorded by position / vertical speed / mode / gravity (`rememberInput` → `OutcomeTracker` →
+`SpotMemory`), and later attempts fire on those spots: `liveStep` returns `Proven` on a good spot and
+`Unsafe` on a bad one, while `interceptInput` may hold a click for a remembered spot ahead. The memory
+is **memory only** — `loadSpots()` clears it when a level opens, `saveSpots()` writes nothing, so the
+old `spots/*.txt` files are gone. Ship and wave only use the `Proven` half (the hold paths would move
+their line). Everything else about attempt-memory (the learned margin) stays off behind
+`Config::learnedMargin`.
+
+**No level scan:** there is no scan UI and `ScanRunner` is never spawned (the engine code still exists
+but is unreachable), same for the autoplay/route subsystem — `setAutoplay()` has no call site.
 
 ---
 
@@ -198,8 +207,11 @@ frame `{15,16,20}`, sidebar `{18,20,25}`, card `{23,25,31}`, button `{32,36,42}`
 1. **Bump the version on every edit.** `mod.json` → `vX.Y.Z`. Patch = fix, minor = feature/look.
    The badge follows automatically (`titleBadge()` strips a leading `v` and trims the patch).
 2. **One accent colour.** Mint `{95,211,160}`. No violet, no per-tab colours, no presets.
-3. **No network.** Anything that phones home (telemetry, update check) stays removed.
-4. **No learned spots, no level scan.**
+3. **No telemetry.** Nothing reports on you. The one network call is the auto-update (1.4.3): it asks
+   GitHub for this repo's latest release and writes it over the installed `.geode`. Setting
+   **Auto Update** turns it off. Do not add anything else that phones home.
+4. **No level scan.** (Session memory exists since 1.3.5: clicks that worked are reused until you leave
+   the level; it is in RAM only and toggleable in Assists.)
 5. **Everything stays inside the window.** Lists clip; no row may draw outside the panel.
 6. **Branding is Aceware / Ace.** No old names, anywhere (including comments and identifiers).
 7. Update `CHANGELOG.md` and, when user-facing, `about.md` and `README.md`.

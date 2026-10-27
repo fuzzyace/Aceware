@@ -1,7 +1,7 @@
 // ============================================================================
 //  Aceware UI pieces (2.2): textures the window draws with, the neon glow, the
 //  starfield, the course demo course in the sidebar and the rocket.
-//  Included by main.cpp inside its namespace, after `aa` and IBLabel (no
+//  Included by main.cpp inside its namespace, after `aa` and AceLabel (no
 //  includes of its own here - main.cpp has them all).
 // ============================================================================
 
@@ -785,10 +785,10 @@ public:
             m_dead -= dt;
             if (m_dead <= 0.f) respawn();
         } else {
-            m_x += ncourse::SPEED * dt;
+            m_x += acecourse::SPEED * dt;
         }
         m_course.ensureAhead(m_x);
-        ncourse::Segment const* seg = m_course.at(m_x);
+        acecourse::Segment const* seg = m_course.at(m_x);
         if (seg && seg->mode != m_mode) enterMode(seg->mode, m_mode >= 0);
         if (m_dead <= 0.f) fireEvents(prevX, m_x);
         // keep the numbers small (at a portal, where nothing is mid-air)
@@ -802,7 +802,7 @@ public:
 
 private:
     float m_w = 80.f, m_h = 60.f, m_alpha = 1.f;
-    ncourse::Course m_course{0xC0FFEEu};
+    acecourse::Course m_course{0xC0FFEEu};
     float m_x = 0.f, m_cam = 0.f, m_dead = 0.f;
     int   m_mode = -1, m_attempt = 1, m_lastMode = -1;
     CCLayerGradient* m_bg = nullptr;
@@ -812,10 +812,10 @@ private:
     CCDrawNode* m_draw = nullptr;
     CCDrawNode* m_trailDraw = nullptr;
     CCNode* m_fx = nullptr;
-    CCSprite* m_portals[ncourse::MODE_N] = {};   // one per mode (only one is ever on screen)
+    CCSprite* m_portals[acecourse::MODE_N] = {};   // one per mode (only one is ever on screen)
     float m_portalFx = 0.f;
     std::string m_anim;                          // robot / spider: the animation playing
-    SimplePlayer* m_icons[ncourse::MODE_N] = {};
+    SimplePlayer* m_icons[acecourse::MODE_N] = {};
     SimplePlayer* m_icon = nullptr;
     std::deque<CCPoint> m_trail;          // world units
     std::deque<CCPoint> m_oldWave;        // the wave's line after it went through a portal (scrolls away)
@@ -826,7 +826,7 @@ private:
 
     static void bgColors(int m, float top[3], float bot[3]) {
         struct C { float t[3], b[3]; };
-        static C const cs[ncourse::MODE_N] = {
+        static C const cs[acecourse::MODE_N] = {
             // (2.3) GD's own bright colours, like Every End's sections
             {{44, 70, 230}, {20, 30, 150}},   // cube: blue
             {{150, 40, 200}, {70, 14, 110}},  // ship: purple
@@ -841,23 +841,23 @@ private:
     }
     static IconType iconType(int m) {
         switch (m) {
-            case ncourse::SHIP: return IconType::Ship;
-            case ncourse::BALL: return IconType::Ball;
-            case ncourse::UFO: return IconType::Ufo;
-            case ncourse::WAVE: return IconType::Wave;
-            case ncourse::SWING: return IconType::Swing;
-            case ncourse::ROBOT: return IconType::Robot;
-            case ncourse::SPIDER: return IconType::Spider;
+            case acecourse::SHIP: return IconType::Ship;
+            case acecourse::BALL: return IconType::Ball;
+            case acecourse::UFO: return IconType::Ufo;
+            case acecourse::WAVE: return IconType::Wave;
+            case acecourse::SWING: return IconType::Swing;
+            case acecourse::ROBOT: return IconType::Robot;
+            case acecourse::SPIDER: return IconType::Spider;
             default: return IconType::Cube;
         }
     }
     static float iconScale(int m) {
         switch (m) {
-            case ncourse::SHIP: return 0.2f;
-            case ncourse::UFO: return 0.235f;
-            case ncourse::WAVE: return 0.2f;
-            case ncourse::ROBOT: return BLK / 33.f;
-            case ncourse::SPIDER: return BLK / 34.f;
+            case acecourse::SHIP: return 0.2f;
+            case acecourse::UFO: return 0.235f;
+            case acecourse::WAVE: return 0.2f;
+            case acecourse::ROBOT: return BLK / 33.f;
+            case acecourse::SPIDER: return BLK / 34.f;
             default: return BLK / 30.f;
         }
     }
@@ -891,7 +891,7 @@ private:
         }
         m_world = CCNode::create();
         clip->addChild(m_world, 2);
-        for (int m = 0; m < ncourse::MODE_N; m++) {
+        for (int m = 0; m < acecourse::MODE_N; m++) {
             // GD's portals are about 3 blocks tall (the ring is 104 of the texture's 144 px)
             CCSprite* p = sprite(portal(m), 3.f * BLK * PORTAL_H / PORTAL_RING_H);
             if (!p) continue;
@@ -908,7 +908,7 @@ private:
         m_world->addChild(m_trailDraw, 3);
         m_fx = CCNode::create();
         m_world->addChild(m_fx, 4);
-        m_course.start(ncourse::CUBE);
+        m_course.start(acecourse::CUBE);
         makeIcons();
         m_x = 0.5f;
         step(0.f);
@@ -920,7 +920,7 @@ private:
             if (ic) ic->removeFromParent();
             ic = nullptr;
         }
-        for (int m = 0; m < ncourse::MODE_N; m++) {
+        for (int m = 0; m < acecourse::MODE_N; m++) {
             m_icons[m] = playerIcon(iconType(m), iconScale(m));
             if (m_icons[m]) {
                 m_icons[m]->setVisible(false);
@@ -935,7 +935,7 @@ private:
 
     CCPoint world(float x, float y) const { return {x * BLK, GROUND + y * BLK}; }
     CCPoint iconPos() const {
-        ncourse::Segment const* s = m_course.at(m_x);
+        acecourse::Segment const* s = m_course.at(m_x);
         float const y = s ? s->yAt(m_x) : 0.5f;
         CCPoint const w = world(m_x, y);
         return {w.x - m_cam * BLK, w.y};
@@ -948,7 +948,7 @@ private:
         m_anim.clear();
         if (m_icon) m_icon->setVisible(m_dead <= 0.f);
         bgColors(m, m_bgTargetTop, m_bgTargetBot);
-        if (m_mode != ncourse::WAVE && !m_trail.empty() && m_lastMode == ncourse::WAVE) m_oldWave = m_trail; // (GD keeps it on screen)
+        if (m_mode != acecourse::WAVE && !m_trail.empty() && m_lastMode == acecourse::WAVE) m_oldWave = m_trail; // (GD keeps it on screen)
         m_lastMode = m;
         m_trail.clear();
         if (!portal) {
@@ -956,7 +956,7 @@ private:
             return;
         }
         // through a portal: a ring of its colour bursts out
-        ncourse::Segment const* s = m_course.at(m_x);
+        acecourse::Segment const* s = m_course.at(m_x);
         CCPoint const at = world(m_x, s ? s->yAt(m_x) : 1.5f);
         if (auto* ring = aa::circleSprite(BLK * 1.2f, portalColor(m))) {
             ring->setPosition(at);
@@ -1019,19 +1019,19 @@ private:
                 CCPoint const at = world(e.x, s.yAt(e.x));
                 ccColor3B const c1 = playerColor(), c2 = playerColor(true);
                 switch (s.mode) {
-                    case ncourse::CUBE:
+                    case acecourse::CUBE:
                         if (e.kind == 2) // landed: a little puff
                             for (int i = 0; i < 5; i++)
                                 square({at.x - m_rng.r(-2.f, 3.f), at.y - BLK * 0.45f}, c1, m_rng.r(0.7f, 1.3f),
                                        {-m_rng.r(2.f, 6.f), m_rng.r(1.f, 4.f)}, m_rng.r(0.25f, 0.4f));
                         break;
-                    case ncourse::UFO:
+                    case acecourse::UFO:
                         if (e.kind == 0)
                             for (int i = 0; i < 5; i++)
                                 square({at.x - m_rng.r(0.f, 3.f), at.y - BLK * 0.35f}, i % 2 ? c1 : ccColor3B{255, 255, 255},
                                        m_rng.r(0.8f, 1.5f), {-m_rng.r(3.f, 8.f), -m_rng.r(3.f, 7.f)}, m_rng.r(0.3f, 0.5f));
                         break;
-                    case ncourse::ROBOT:
+                    case acecourse::ROBOT:
                         if (e.kind == 0) // the jump: a burst of fire from its feet
                             for (int i = 0; i < 6; i++)
                                 flame({at.x - m_rng.r(-1.5f, 1.5f), at.y - BLK * 0.5f}, m_rng.r(2.f, 3.2f),
@@ -1041,10 +1041,10 @@ private:
                                 square({at.x - m_rng.r(-2.f, 3.f), at.y - BLK * 0.45f}, c1, m_rng.r(0.7f, 1.2f),
                                        {-m_rng.r(2.f, 6.f), m_rng.r(1.f, 3.f)}, m_rng.r(0.25f, 0.4f));
                         break;
-                    case ncourse::SPIDER:
+                    case acecourse::SPIDER:
                         if (e.kind == 3) {
                             // the teleport: a line of light from where it was to where it is, like GD's
-                            float const from = s.yAt(e.x - ncourse::DX), to = s.yAt(e.x + ncourse::DX);
+                            float const from = s.yAt(e.x - acecourse::DX), to = s.yAt(e.x + acecourse::DX);
                             CCPoint const a = world(e.x, from), b = world(e.x, to);
                             if (CCTexture2D* tex = tpStreak()) {
                                 auto* ln = CCSprite::createWithTexture(tex);
@@ -1075,7 +1075,7 @@ private:
 
     void respawn() {
         // back to the start of this section, like practice: "Attempt N"
-        ncourse::Segment const* s = m_course.at(m_x);
+        acecourse::Segment const* s = m_course.at(m_x);
         if (!s) return;
         float const x0 = s->x0;
         m_x = x0 + 0.01f;
@@ -1084,11 +1084,11 @@ private:
         m_oldWave.clear();
         m_fx->removeAllChildren();
         if (m_icon) m_icon->setVisible(true);
-        auto* l = IBLabel::make(fmt::format("Attempt {}", m_attempt).c_str(), "bigFont.fnt");
+        auto* l = AceLabel::make(fmt::format("Attempt {}", m_attempt).c_str(), "bigFont.fnt");
         if (l) {
             l->setScale(0.22f);
             l->setAnchorPoint({0.f, 0.5f});
-            l->setPosition(world(x0 + 1.2f, ncourse::hasCeiling(s->mode) ? 4.2f : 4.6f));
+            l->setPosition(world(x0 + 1.2f, acecourse::hasCeiling(s->mode) ? 4.2f : 4.6f));
             l->setOpacity(0);
             l->runAction(CCSequence::create(CCFadeTo::create(0.25f, 230), CCDelayTime::create(2.5f), CCFadeTo::create(0.6f, 0),
                                             CCRemoveSelf::create(), nullptr));
@@ -1159,7 +1159,7 @@ private:
     }
     // A block of GD 1.0 tiles (Every End's look): black, a white outline round
     // the whole block, faint lines between its tiles.
-    void drawBlock(ncourse::Block const& bl) {
+    void drawBlock(acecourse::Block const& bl) {
         CCPoint const a = world(bl.x, bl.y), b = world(bl.x + bl.w, bl.y + bl.h);
         ccColor3B const fill{static_cast<GLubyte>(m_bgBot[0] * 0.7f), static_cast<GLubyte>(m_bgBot[1] * 0.7f), static_cast<GLubyte>(m_bgBot[2] * 0.75f)};
         quad(a, {b.x, a.y}, b, {a.x, b.y}, pm(fill, 1.f));
@@ -1179,7 +1179,7 @@ private:
         CCPoint pts[4] = {a, b, c, d};
         m_draw->drawPolygon(pts, 4, col, 0.f, ccColor4F{0.f, 0.f, 0.f, 0.f});
     }
-    void drawSpike(ncourse::Spike const& s) {
+    void drawSpike(acecourse::Spike const& s) {
         float const tipY = s.down ? s.base - 1.f : s.base + 1.f;
         CCPoint const a = world(s.x + 0.06f, s.base), b = world(s.x + 0.94f, s.base), t = world(s.x + 0.5f, tipY);
         CCPoint pts[3] = {a, b, t};
@@ -1207,11 +1207,11 @@ private:
             if (s.x1 < L || s.x0 > R) continue;
             float const a = std::max(L, s.x0), b = std::min(R, s.x1);
             {   // (2.3) a top always - the cube and the robot just never reach it
-                quad(world(a, ncourse::CEIL), world(b, ncourse::CEIL), world(b, top + 1.f), world(a, top + 1.f), pm(groundCol, 1.f));
+                quad(world(a, acecourse::CEIL), world(b, acecourse::CEIL), world(b, top + 1.f), world(a, top + 1.f), pm(groundCol, 1.f));
                 for (float gx = std::floor(a / 2.f) * 2.f; gx < b; gx += 2.f)
-                    if (gx >= a) line(world(gx, ncourse::CEIL), world(gx, top + 1.f), 0.14f, pm({255, 255, 255}, 0.06f));
-                line(world(a, ncourse::CEIL), world(b, ncourse::CEIL), 1.1f, pm({200, 170, 255}, 0.12f));
-                line(world(a, ncourse::CEIL), world(b, ncourse::CEIL), 0.35f, pm({255, 255, 255}, 0.85f));
+                    if (gx >= a) line(world(gx, acecourse::CEIL), world(gx, top + 1.f), 0.14f, pm({255, 255, 255}, 0.06f));
+                line(world(a, acecourse::CEIL), world(b, acecourse::CEIL), 1.1f, pm({200, 170, 255}, 0.12f));
+                line(world(a, acecourse::CEIL), world(b, acecourse::CEIL), 0.35f, pm({255, 255, 255}, 0.85f));
             }
             for (auto const& bl : s.blocks) {
                 if (bl.x + bl.w < L || bl.x > R) continue;
@@ -1221,9 +1221,9 @@ private:
             if (!s.wallLo.empty()) drawWaveWalls(s, L, R);
         }
         // portals: the oval at the end of a section, in the next mode's colour
-        bool shown[ncourse::MODE_N] = {};
+        bool shown[acecourse::MODE_N] = {};
         for (auto const& s : m_course.segs) {
-            if (s.nextMode < 0 || s.nextMode >= ncourse::MODE_N || s.x1 < L - 1.f || s.x1 > R + 1.f) continue;
+            if (s.nextMode < 0 || s.nextMode >= acecourse::MODE_N || s.x1 < L - 1.f || s.x1 > R + 1.f) continue;
             CCSprite* p = m_portals[s.nextMode];
             if (!p || shown[s.nextMode]) continue;
             shown[s.nextMode] = true;
@@ -1238,13 +1238,13 @@ private:
                        {-m_rng.r(3.f, 9.f), m_rng.r(-2.f, 2.f)}, m_rng.r(0.4f, 0.7f), 200);
             }
         }
-        for (int m = 0; m < ncourse::MODE_N; m++) if (m_portals[m] && !shown[m]) m_portals[m]->setVisible(false);
+        for (int m = 0; m < acecourse::MODE_N; m++) if (m_portals[m] && !shown[m]) m_portals[m]->setVisible(false);
     }
 
-    void drawWaveWalls(ncourse::Segment const& s, float L, float R) {
+    void drawWaveWalls(acecourse::Segment const& s, float L, float R) {
         int const n = s.count();
-        int const i0 = std::max(0, static_cast<int>((L - s.x0) / ncourse::DX));
-        int const i1 = std::min(n - 1, static_cast<int>((R - s.x0) / ncourse::DX) + 1);
+        int const i0 = std::max(0, static_cast<int>((L - s.x0) / acecourse::DX));
+        int const i1 = std::min(n - 1, static_cast<int>((R - s.x0) / acecourse::DX) + 1);
         constexpr int STEP = 2;
         ccColor4F const fill{0.02f, 0.016f, 0.04f, 1.f};
         ccColor4F const edge = pm({240, 236, 255}, 0.9f);
@@ -1259,12 +1259,12 @@ private:
             r.b = b;
         };
         for (int i = i0; i + STEP <= i1; i += STEP) {
-            float const xa = s.x0 + static_cast<float>(i) * ncourse::DX, xb = s.x0 + static_cast<float>(i + STEP) * ncourse::DX;
+            float const xa = s.x0 + static_cast<float>(i) * acecourse::DX, xb = s.x0 + static_cast<float>(i + STEP) * acecourse::DX;
             float const la = s.wallLo[static_cast<size_t>(i)], lb = s.wallLo[static_cast<size_t>(i + STEP)];
             float const ha = s.wallHi[static_cast<size_t>(i)], hb = s.wallHi[static_cast<size_t>(i + STEP)];
             bool const haveLo = la >= 0.f && lb >= 0.f, haveHi = ha >= 0.f && hb >= 0.f;
             if (haveLo) quad(world(xa, 0.f), world(xb, 0.f), world(xb, lb), world(xa, la), fill);
-            if (haveHi) quad(world(xa, ha), world(xb, hb), world(xb, ncourse::CEIL), world(xa, ncourse::CEIL), fill);
+            if (haveHi) quad(world(xa, ha), world(xb, hb), world(xb, acecourse::CEIL), world(xa, acecourse::CEIL), fill);
             feed(lo, haveLo, world(xa, la), world(xb, lb));
             feed(hi, haveHi, world(xa, ha), world(xb, hb));
         }
@@ -1297,18 +1297,18 @@ private:
     void playAnim(char const* name) { playIconAnim(m_icon, m_anim, name); }
     void placeIcon(float dt) {
         if (!m_icon) return;
-        ncourse::Segment const* s = m_course.at(m_x);
+        acecourse::Segment const* s = m_course.at(m_x);
         if (!s) return;
         float const y = s->yAt(m_x);
         float const rot = s->rotAt(m_x);
         bool const grounded = s->groundedAt(m_x), held = s->heldAt(m_x);
-        bool const onCeiling = ncourse::hasCeiling(m_mode) && y > ncourse::CEIL / 2.f;
+        bool const onCeiling = acecourse::hasCeiling(m_mode) && y > acecourse::CEIL / 2.f;
         CCPoint const p = world(m_x, y);
         m_icon->setPosition(p);
         m_icon->setRotation(rot);
         float const sc = iconScale(m_mode);
         m_icon->setScaleX(sc);
-        m_icon->setScaleY(m_mode == ncourse::SPIDER && onCeiling ? -sc : sc); // the spider walks the ceiling upside down
+        m_icon->setScaleY(m_mode == acecourse::SPIDER && onCeiling ? -sc : sc); // the spider walks the ceiling upside down
         m_trailDraw->clear();
         ccColor3B const c1 = playerColor(), c2 = playerColor(true);
         if (!m_oldWave.empty()) {
@@ -1327,30 +1327,30 @@ private:
                        {-m_rng.r(2.f, 6.f), (onCeiling ? -1.f : 1.f) * m_rng.r(0.5f, 3.5f)}, m_rng.r(0.25f, 0.4f));
         };
         switch (m_mode) {
-            case ncourse::CUBE:
+            case acecourse::CUBE:
                 groundBits(c1);
                 break;
-            case ncourse::BALL:
+            case acecourse::BALL:
                 groundBits(c1);
                 m_trail.clear();
                 break;
-            case ncourse::SHIP:
+            case acecourse::SHIP:
                 streak(p, c2);
                 if (held && emit) // the ship's fire, out of its back while you hold
                     for (int i = 0; i < 2; i++)
                         flame({p.x - BLK * 0.6f, p.y - BLK * 0.12f}, m_rng.r(1.8f, 3.f), {-m_rng.r(6.f, 11.f), m_rng.r(-2.5f, 1.f)},
                               m_rng.r(0.16f, 0.28f));
                 break;
-            case ncourse::UFO:
+            case acecourse::UFO:
                 streak(p, c2);
                 break;
-            case ncourse::SWING:
+            case acecourse::SWING:
                 streak(p, c2);
                 if (emit) // pushed up: fire below it; pushed down: fire above it
                     flame({p.x - BLK * 0.15f, p.y + (held ? -1.f : 1.f) * BLK * 0.5f}, m_rng.r(1.6f, 2.6f),
                           {-m_rng.r(3.f, 6.f), (held ? -1.f : 1.f) * m_rng.r(3.f, 6.f)}, m_rng.r(0.15f, 0.25f));
                 break;
-            case ncourse::ROBOT:
+            case acecourse::ROBOT:
                 playAnim(grounded ? "run" : "fall_loop");
                 groundBits(c1);
                 if (held && emit) // the held jump's fire under its feet
@@ -1358,11 +1358,11 @@ private:
                         flame({p.x + m_rng.r(-1.5f, 1.f), p.y - BLK * 0.55f}, m_rng.r(1.8f, 3.f), {m_rng.r(-3.f, 1.f), -m_rng.r(5.f, 9.f)},
                               m_rng.r(0.15f, 0.26f));
                 break;
-            case ncourse::SPIDER:
+            case acecourse::SPIDER:
                 playAnim("run");
                 groundBits(c1);
                 break;
-            case ncourse::WAVE: {
+            case acecourse::WAVE: {
                 // GD's wave: a solid line (colour 2 by default), into the back of the arrow
                 m_trail.push_back(p);
                 while (m_trail.size() > 2 && m_trail.front().x < p.x - (m_w + 10.f)) m_trail.pop_front();
@@ -1385,7 +1385,7 @@ private:
     // GD's player trail: your second colour, bright at the icon, fading behind it
     void streak(CCPoint p, ccColor3B c) {
         m_trail.push_back(p);
-        float const len = 0.3f * ncourse::SPEED * BLK;
+        float const len = 0.3f * acecourse::SPEED * BLK;
         while (m_trail.size() > 2 && m_trail.front().x < p.x - len) m_trail.pop_front();
         size_t const n = m_trail.size();
         for (size_t i = 1; i < n; i++) {

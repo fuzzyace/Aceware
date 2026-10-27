@@ -1,5 +1,5 @@
 // ============================================================================
-//  BufferCore.hpp  -  the parts of the input buffer that don't touch the game
+//  BufferCore.hpp  -  the parts of Aceware that don't touch the game
 //
 //  Kept free of Geode / cocos so they can be unit-tested on their own
 //  (see tests/core_tests.cpp):
@@ -32,7 +32,7 @@
 #include <optional>
 #include <vector>
 
-namespace ibcore {
+namespace acecore {
 
 // ----------------------------------------------------------------------------
 //  Delay search
@@ -857,7 +857,7 @@ public:
     // Saved to a file per level, so what you learned survives restarts.
     // One spot per line: "x y vy key good bad [anyKey]". Bad lines are skipped.
     std::string serialize() const {
-        std::string out = "IBSPOTS 1\n";
+        std::string out = "ACESPOTS 1\n";
         char buf[96];
         for (Spot const& s : m_spots) {
             std::snprintf(buf, sizeof(buf), "%.2f %.2f %.3f %u %d %d %u\n", s.x, s.y, s.vy,
@@ -877,7 +877,7 @@ public:
             pos = end + 1;
             if (header) {
                 header = false;
-                if (line.rfind("IBSPOTS", 0) == 0) continue;
+                if (line.rfind("ACESPOTS", 0) == 0) continue;
             }
             char const* c = line.c_str();
             char* q = nullptr;
@@ -1148,4 +1148,4 @@ inline int waveRayDelay(WaveRayIn const& in, int minD, int maxD, int commit, std
     return best;
 }
 
-} // namespace ibcore
+} // namespace acecore
