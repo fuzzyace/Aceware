@@ -3,6 +3,12 @@
 All notable changes to Aceware. Version numbers follow `mod.json`; the in-game badge shows the
 short form (`v1.3` for `1.3.0`).
 
+## 1.4.5
+
+- The cat is gone (it never made it into a build you ran - 1.4.4 was published but not installed).
+- In its place, a small red button sits in the sidebar of the window, under the tabs, and
+  pulsing for attention: **DO NOT PRESS!!!** Pressing it pops meow. That is all it does.
+  It is on every tab, because a warning like that should be impossible to miss.
 ## 1.4.4
 
 - A cat. Every 25-45 seconds it pads along the bottom of the window, bobbing as it

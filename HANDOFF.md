@@ -15,7 +15,7 @@ was collapsed from an older multi-folder layout into this single folder.
 
 Aceware is a **Geode mod for Geometry Dash 2.2081 (Windows)** that buffers input: if you click
 slightly early, the click is held and fired on the first tick where the hidden simulated player
-survives. Mod id `ace.aceware`, developer `Ace`, current version **v1.4.4** (`mod.json` is the single
+survives. Mod id `ace.aceware`, developer `Ace`, current version **v1.4.5** (`mod.json` is the single
 source of truth; the in-game badge is derived from it at runtime).
 
 It started as a derivative of an earlier project of the same kind, which is
@@ -43,7 +43,7 @@ Aceware\                                  repo root = workspace = build root
 ├─ resources\fonts\                        Poppins-Bold.ttf + OFL.txt
 ├─ tools\local-build.ps1                   the offline build (expects ..\..\toolchain)
 ├─ .github\workflows\build.yml             CI: build + artifact upload (no release job)
-├─ release\Aceware-1.4.4.geode             shipped binary
+├─ release\Aceware-1.4.5.geode             shipped binary
 ├─ CMakeLists.txt                          standard Geode build (the CI path)
 ├─ mod.json                                version single source of truth
 ├─ README.md, CHANGELOG.md, about.md, logo.png
@@ -86,7 +86,7 @@ binding sources).
 
 **Packaging.** There is no `package.ps1` in this tree. A `.geode` is just a zip whose root holds the
 DLL, the manifest, `about.md` and `resources\` — exactly the five entries inside
-`release\Aceware-1.4.4.geode`:
+`release\Aceware-1.4.5.geode`:
 
 ```
 about.md    ace.aceware.dll    mod.json    resources\fonts\OFL.txt    resources\fonts\Poppins-Bold.ttf
@@ -207,7 +207,7 @@ frame `{15,16,20}`, sidebar `{18,20,25}`, card `{23,25,31}`, button `{32,36,42}`
 1. **Bump the version on every edit.** `mod.json` → `vX.Y.Z`. Patch = fix, minor = feature/look.
    The badge follows automatically (`titleBadge()` strips a leading `v` and trims the patch).
 2. **One accent colour.** Mint `{95,211,160}`. No violet, no per-tab colours, no presets.
-3. **No telemetry.** Nothing reports on you. The one network call is the auto-update (1.4.4): it asks
+3. **No telemetry.** Nothing reports on you. The one network call is the auto-update (1.4.5): it asks
    GitHub for this repo's latest release and writes it over the installed `.geode`. Setting
    **Auto Update** turns it off. Do not add anything else that phones home.
 4. **No level scan.** (Session memory exists since 1.3.5: clicks that worked are reused until you leave

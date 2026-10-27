@@ -13928,35 +13928,6 @@ protected:
 
         // (1.4.4) a small cat, drawn from circles so it costs nothing and can't be
         // missing. Hidden until it feels like a walk along the footer.
-        if (auto* cat = CCDrawNode::create()) {
-            ccColor4F const fur{0.09f, 0.09f, 0.12f, 1.f};
-            ccColor4F const eye{0.37f, 0.83f, 0.63f, 1.f}; // mint, like everything else
-            // filled circles as polygons (this cocos has no drawSolidCircle)
-            auto disc = [cat](CCPoint c, float r, ccColor4F col) {
-                constexpr int N = 20;
-                CCPoint pts[N];
-                for (int i = 0; i < N; i++) {
-                    float const a = static_cast<float>(i) / static_cast<float>(N) * 6.2831853f;
-                    pts[i] = CCPoint(c.x + std::cos(a) * r, c.y + std::sin(a) * r);
-                }
-                cat->drawPolygon(pts, N, col, 0.f, ccColor4F{0.f, 0.f, 0.f, 0.f});
-            };
-            disc({0.f, 2.2f}, 4.6f, fur);      // body
-            disc({-5.2f, 4.4f}, 3.4f, fur);    // head
-            CCPoint ear1[3] = {{-8.2f, 6.0f}, {-7.2f, 9.0f}, {-5.4f, 6.6f}};
-            cat->drawPolygon(ear1, 3, fur, 0.f, fur);
-            CCPoint ear2[3] = {{-5.0f, 6.8f}, {-3.4f, 8.8f}, {-2.4f, 5.8f}};
-            cat->drawPolygon(ear2, 3, fur, 0.f, fur);
-            disc({-6.3f, 4.7f}, 0.75f, eye);   // eyes
-            disc({-4.1f, 4.7f}, 0.75f, eye);
-            cat->drawSegment({4.2f, 2.4f}, {7.0f, 5.6f}, 0.7f, fur);     // tail
-            cat->drawSegment({7.0f, 5.6f}, {5.6f, 8.0f}, 0.7f, fur);
-            cat->drawSegment({-2.2f, -1.4f}, {-2.2f, -3.4f}, 0.7f, fur); // legs
-            cat->drawSegment({1.8f, -1.4f}, {1.8f, -3.4f}, 0.7f, fur);
-            cat->setVisible(false);
-            m_body->addChild(cat, 55);
-            m_cat = cat;
-        }
 
         restorePosition();
         setTouchEnabled(true);
@@ -14328,6 +14299,16 @@ protected:
             } else {
                 m_tabHi->runAction(CCEaseOut::create(CCMoveTo::create(0.12f, to), 2.5f));
             }
+        }
+        // (1.4.5) a small, extremely ill-advised button, always in the sidebar
+        if (auto* item = boxButton(m_tabMenu, "DO NOT PRESS!!!", {8.f + iw / 2.f, 44.f}, iw, 13.f,
+                                   ccColor3B{134, 26, 30}, aw::themed(ccColor3B{255, 230, 230}), 0.2f, [] {
+                                       Notification::create("meow", NotificationIcon::Error, 2.2f)->show();
+                                   })) {
+            item->stopAllActions();
+            item->runAction(CCRepeatForever::create(CCSequence::create(
+                CCEaseInOut::create(CCScaleTo::create(0.55f, 1.08f), 1.7f),
+                CCEaseInOut::create(CCScaleTo::create(0.55f, 1.f), 1.7f), nullptr)));
         }
     }
 
@@ -15599,15 +15580,6 @@ protected:
     Ref<aw::RobotHop> m_robot;
     float m_robotClock = 0.f;
     aw::Rand m_fxRand{static_cast<uint32_t>(std::random_device{}())};
-    // (1.4.4) the cat: every so often it pads along the footer, and it leaves
-    // double-quick if you poke it. Purely decorative.
-    Ref<CCDrawNode> m_cat;
-    float m_catT = 20.f;      // seconds until the next visit
-    float m_catX = 0.f;
-    float m_catDir = 1.f;
-    float m_catSpeed = 0.f;
-    float m_catBob = 0.f;
-    bool  m_catWalk = false;
     // (2.3) you picked another icon / colours in the garage while the window
     // is up: the robot and the Modes tab's icons change too
     long long m_iconSig = 0;
@@ -15737,29 +15709,6 @@ protected:
             auto* r = typeinfo_cast<CCRGBAProtocol*>(m_tabHi);
             if (r) r->setOpacity(static_cast<GLubyte>(236 + 14 * std::sin(m_animT * 2.4f)));
         }
-        // (1.4.4) the cat: wanders along the footer now and then, inside the window
-        if (m_cat) {
-            if (!m_catWalk) {
-                m_catT -= dt;
-                if (m_catT <= 0.f && isVisible()) {
-                    m_catWalk = true;
-                    m_catDir = m_fxRand.f() < 0.5f ? -1.f : 1.f;
-                    m_catSpeed = m_fxRand.r(20.f, 32.f) * m_catDir;
-                    m_catX = m_catDir > 0.f ? -14.f : FULL_W + 14.f;
-                    m_cat->setVisible(true);
-                }
-            } else {
-                m_catX += m_catSpeed * dt;
-                m_catBob += dt;
-                m_cat->setPosition({m_catX, 5.5f + std::fabs(std::sin(m_catBob * 7.f)) * 1.4f});
-                m_cat->setScaleX(m_catDir > 0.f ? 1.f : -1.f);
-                if (m_catX < -24.f || m_catX > FULL_W + 24.f) {
-                    m_catWalk = false;
-                    m_cat->setVisible(false);
-                    m_catT = m_fxRand.r(25.f, 45.f);
-                }
-            }
-        }
         // the resize strokes only exist while you drag the corner, and pulse then
         for (size_t i = 0; i < m_grip.size(); i++) {
             CCNode* g = m_grip[i];
@@ -15801,15 +15750,6 @@ protected:
         }
         CCPoint const p = convertToNodeSpace(touch->getLocation());
         if (!insideLocal(p)) return false;
-        // (1.4.4) the cat: poke it and it hurries off
-        if (m_cat && m_cat->isVisible()) {
-            CCPoint const cp = m_cat->getPosition();
-            if (std::fabs(bp.x - cp.x) < 11.f && std::fabs(bp.y - cp.y) < 10.f) {
-                Notification::create("meow", NotificationIcon::None, 1.f)->show();
-                m_catSpeed *= 2.2f;
-                return true;
-            }
-        }
         // corner grip: drag to resize, no settings menu needed. Starts past the
         // settings cog, which owns the rest of the footer's right end.
         if (p.x > FULL_W - 11.f && p.y < 16.f) {

@@ -6,13 +6,13 @@
 click waits for a tick where it actually survives, then goes through.
 
 - **Windows**, Geometry Dash **2.2081**, Geode **5.11.2**
-- Version **1.4.4**
+- Version **1.4.5**
 - No network calls, no telemetry, no update checks.
 
 ## Install
 
 1. Install [Geode](https://geode-sdk.org/install/) for Geometry Dash 2.2081.
-2. Download `release/Aceware-1.4.4.geode`.
+2. Download `release/Aceware-1.4.5.geode`.
 3. Drop it into `Geometry Dash/geode/mods/`, or drag it onto the game window.
 4. Start the game and enable **Aceware** in the Geode mod list.
 
