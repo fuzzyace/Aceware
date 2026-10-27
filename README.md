@@ -7,7 +7,6 @@ click waits for a tick where it actually survives, then goes through.
 
 - **Windows**, Geometry Dash **2.2081**, Geode **5.11.2**
 - Version **1.4.5**
-- No network calls, no telemetry, no update checks.
 
 ## Install
 
